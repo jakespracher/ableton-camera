@@ -29,27 +29,7 @@ def test_inject_record_mode_start_stop():
     assert edges[-1] == RecordingEdge.STOPPED
 
 
-def test_clip_recording_extends_session_tail():
-    edges: list[RecordingEdge] = []
-    listener = OscListener(
-        "127.0.0.1",
-        11000,
-        "127.0.0.1",
-        11001,
-        lambda edge, _signals: edges.append(edge),
-    )
-    listener._clip_recording = True
-    listener.inject("/live/song/get/record_mode", 1)
-    assert RecordingEdge.STARTED in edges
-    listener._clip_recording = True
-    listener.inject("/live/song/get/record_mode", 0)
-    assert RecordingEdge.STOPPED not in edges
-    listener._clip_recording = False
-    listener._dispatch_edges()
-    assert edges[-1] == RecordingEdge.STOPPED
-
-
-def test_session_status_alone_does_not_start():
+def test_session_record_engaged_fires_start():
     edges: list[RecordingEdge] = []
     listener = OscListener(
         "127.0.0.1",
@@ -60,4 +40,23 @@ def test_session_status_alone_does_not_start():
     )
     listener._clip_recording = False
     listener.inject("/live/song/get/session_record_status", 1)
-    assert edges == []
+    assert RecordingEdge.STARTED in edges
+
+
+def test_clip_tail_keeps_stop_active_after_session_off():
+    edges: list[RecordingEdge] = []
+    listener = OscListener(
+        "127.0.0.1",
+        11000,
+        "127.0.0.1",
+        11001,
+        lambda edge, _signals: edges.append(edge),
+    )
+    listener._clip_recording = True
+    listener.inject("/live/song/get/record_mode", 1)
+    listener._clip_recording = True
+    listener.inject("/live/song/get/record_mode", 0)
+    assert RecordingEdge.STOPPED not in edges
+    listener._clip_recording = False
+    listener._dispatch_edges()
+    assert edges[-1] == RecordingEdge.STOPPED

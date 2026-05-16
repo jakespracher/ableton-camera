@@ -16,21 +16,25 @@ class RecordingSignals:
     clip_recording: bool = False
 
     @property
-    def active(self) -> bool:
-        # Arrangement: follow transport record. Session clips: follow clip.is_recording
-        # so OBS stops after the quantized bar, not when the stop button is pressed.
+    def stop_active(self) -> bool:
+        """True while audio is still being written (arrangement or clip tail)."""
         return bool(self.arrangement == 1 or self.clip_recording)
+
+    @property
+    def active(self) -> bool:
+        """Alias used by the state machine (stop_active drives start/stop edges)."""
+        return self.stop_active
 
 
 @dataclass
 class RecordingStateMachine:
-    """Tracks combined arrangement + session recording; emits start/stop edges."""
+    """Tracks capture state; emits start/stop edges from stop_active."""
 
     was_active: bool = False
 
     def apply(self, signals: RecordingSignals) -> list[RecordingEdge]:
         edges: list[RecordingEdge] = []
-        is_active = signals.active
+        is_active = signals.stop_active
 
         if is_active and not self.was_active:
             edges.append(RecordingEdge.STARTED)
@@ -41,9 +45,8 @@ class RecordingStateMachine:
         return edges
 
     def sync_initial(self, signals: RecordingSignals) -> list[RecordingEdge]:
-        """On boot: if already recording, emit STARTED once."""
-        if signals.active and not self.was_active:
+        if signals.stop_active and not self.was_active:
             self.was_active = True
             return [RecordingEdge.STARTED]
-        self.was_active = signals.active
+        self.was_active = signals.stop_active
         return []

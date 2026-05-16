@@ -81,6 +81,20 @@ def main(argv: list[str] | None = None) -> int:
         config.staging_dir,
     )
     def on_edge(edge: RecordingEdge, signals: RecordingSignals) -> None:
+        if edge is RecordingEdge.STARTED:
+            logger.info(
+                "Live recording started (arrangement=%s session_status=%s clip=%s)",
+                signals.arrangement,
+                signals.session_status,
+                signals.clip_recording,
+            )
+        elif edge is RecordingEdge.STOPPED:
+            logger.info(
+                "Live recording stopped (arrangement=%s session_status=%s clip=%s)",
+                signals.arrangement,
+                signals.session_status,
+                signals.clip_recording,
+            )
         recorder.on_edge(edge, signals)
 
     def on_count_in_finished(signals: RecordingSignals) -> None:

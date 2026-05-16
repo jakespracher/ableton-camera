@@ -113,7 +113,11 @@ class OscListener:
         self._dispatch_edges()
 
     def _on_session_status(self, address: str, *args: int) -> None:
+        prev = self._session_status
         self.handle_session_status(address, *args)
+        # Session record engaged: start OBS even before clip is_recording is visible.
+        if self._session_status != 0 and prev == 0:
+            self._on_edge(RecordingEdge.STARTED, self.signals)
         self._dispatch_edges()
 
     def _on_counting_in(self, _address: str, *args: int) -> None:
@@ -168,29 +172,35 @@ class OscListener:
                 return
 
     def fetch_clip_is_recording(self, track_id: int, clip_id: int, timeout_s: float) -> bool:
-        self._clip_reply_value = None
+        with self._lock:
+            self._clip_reply_value = None
         self._clip_reply_event.clear()
         self._send("/live/clip/get/is_recording", track_id, clip_id)
         self._wait_clip_reply(timeout_s)
-        return bool(self._clip_reply_value)
+        with self._lock:
+            return bool(self._clip_reply_value)
 
     def fetch_playing_slot_index(self, track_id: int, timeout_s: float) -> int:
-        self._slot_reply_value = None
+        with self._lock:
+            self._slot_reply_value = None
         self._slot_reply_event.clear()
         self._send("/live/track/get/playing_slot_index", track_id)
         self._wait_slot_reply(timeout_s)
-        if self._slot_reply_value is None:
-            return -1
-        return int(self._slot_reply_value)
+        with self._lock:
+            if self._slot_reply_value is None:
+                return -1
+            return int(self._slot_reply_value)
 
     def fetch_fired_slot_index(self, track_id: int, timeout_s: float) -> int:
-        self._slot_reply_value = None
+        with self._lock:
+            self._slot_reply_value = None
         self._slot_reply_event.clear()
         self._send("/live/track/get/fired_slot_index", track_id)
         self._wait_slot_reply(timeout_s)
-        if self._slot_reply_value is None:
-            return -1
-        return int(self._slot_reply_value)
+        with self._lock:
+            if self._slot_reply_value is None:
+                return -1
+            return int(self._slot_reply_value)
 
     def _scan_clip_recording(self) -> bool:
         from bridge.osc_clip_probe import LiveOscClipProbe
@@ -206,14 +216,18 @@ class OscListener:
                 clip_active = self._clip_recording
             if clip_active != self._clip_recording:
                 self._clip_recording = clip_active
-                logger.debug("clip_recording=%s", clip_active)
+                logger.info("clip_recording=%s", clip_active)
                 self._dispatch_edges()
             self._stop_clip_poll.wait(interval_s)
 
     def start_clip_poll(self, interval_s: float = 0.15) -> None:
         self.stop_clip_poll()
         self._stop_clip_poll.clear()
-        self._clip_recording = self._scan_clip_recording()
+        try:
+            self._clip_recording = self._scan_clip_recording()
+        except Exception:
+            logger.exception("Initial clip scan failed; assuming not recording")
+            self._clip_recording = False
         self._clip_poll_thread = Thread(
             target=self._clip_poll_loop,
             args=(interval_s,),
