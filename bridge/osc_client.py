@@ -17,6 +17,12 @@ logger = logging.getLogger(__name__)
 RecordingHandler = Callable[[RecordingEdge, RecordingSignals], None]
 
 
+class ReuseAddrOSCUDPServer(BlockingOSCUDPServer):
+    """Allow quick restart when a previous bridge process was just killed."""
+
+    allow_reuse_address = True
+
+
 class OscListener:
     """Listens for AbletonOSC record property changes; emits STARTED/STOPPED edges."""
 
@@ -167,7 +173,7 @@ class OscListener:
         dispatcher.map("/live/track/get/arm", self._on_arm)
         dispatcher.map("/live/track/get/name", self._on_name)
         dispatcher.map("/live/view/get/selected_track", self._on_selected_track)
-        self._server = BlockingOSCUDPServer((self._listen_host, self._listen_port), dispatcher)
+        self._server = ReuseAddrOSCUDPServer((self._listen_host, self._listen_port), dispatcher)
         self._thread = Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
         self.subscribe()

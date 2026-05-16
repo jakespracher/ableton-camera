@@ -110,7 +110,16 @@ def main(argv: list[str] | None = None) -> int:
     signal.signal(signal.SIGINT, shutdown)
     signal.signal(signal.SIGTERM, shutdown)
 
-    listener.start()
+    try:
+        listener.start()
+    except OSError as exc:
+        if getattr(exc, "errno", None) == 48:  # Address already in use
+            logger.error(
+                "Port %s is in use (another ableton-camera still running?). "
+                "Kill it with: pkill -f ableton-camera",
+                config.osc.listen_port,
+            )
+        raise
     logger.info("Listening for Ableton recording (arrangement + session)...")
     signal.pause()
     return 0
