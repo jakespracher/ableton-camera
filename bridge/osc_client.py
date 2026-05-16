@@ -33,16 +33,20 @@ class OscListener:
         listen_host: str,
         listen_port: int,
         on_edge: RecordingHandler,
+        on_count_in_finished: Callable[[RecordingSignals], None] | None = None,
     ) -> None:
         self._send_host = send_host
         self._send_port = send_port
         self._listen_host = listen_host
         self._listen_port = listen_port
         self._on_edge = on_edge
+        self._on_count_in_finished = on_count_in_finished
         self._client = SimpleUDPClient(send_host, send_port)
         self._state = RecordingStateMachine()
         self._arrangement = 0
         self._session_status = 0
+        self._counting_in = False
+        self._count_in_event = threading.Event()
         self._server: BlockingOSCUDPServer | None = None
         self._thread: Thread | None = None
         self._lock = threading.Lock()
@@ -64,11 +68,16 @@ class OscListener:
     def subscribe(self) -> None:
         self._send("/live/song/start_listen/record_mode")
         self._send("/live/song/start_listen/session_record_status")
+        self._send("/live/song/start_listen/is_counting_in")
         self._query_initial_state()
 
     def _query_initial_state(self) -> None:
         self._send("/live/song/get/record_mode")
         self._send("/live/song/get/session_record_status")
+        self._send("/live/song/get/is_counting_in")
+
+    def is_counting_in(self) -> bool:
+        return self._counting_in
 
     def _send(self, address: str, *args: int | float | str) -> None:
         payload = list(args) if args else []
@@ -99,6 +108,28 @@ class OscListener:
     def _on_session_status(self, address: str, *args: int) -> None:
         self.handle_session_status(address, *args)
         self._dispatch_edges()
+
+    def _on_counting_in(self, _address: str, *args: int) -> None:
+        if not args:
+            return
+        was_counting = self._counting_in
+        self._counting_in = bool(int(args[-1]))
+        self._count_in_event.set()
+        if was_counting and not self._counting_in and self._on_count_in_finished:
+            self._on_count_in_finished(self.signals)
+
+    def _wait_count_in(self, timeout_s: float) -> None:
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            if self._count_in_event.wait(timeout=0.05):
+                self._count_in_event.clear()
+                return
+
+    def fetch_counting_in(self, timeout_s: float = 0.5) -> bool:
+        self._count_in_event.clear()
+        self._send("/live/song/get/is_counting_in")
+        self._wait_count_in(timeout_s)
+        return self._counting_in
 
     def _on_num_tracks(self, _address: str, *args: int) -> None:
         if args:
@@ -169,6 +200,7 @@ class OscListener:
         dispatcher = Dispatcher()
         dispatcher.map("/live/song/get/record_mode", self._on_record_mode)
         dispatcher.map("/live/song/get/session_record_status", self._on_session_status)
+        dispatcher.map("/live/song/get/is_counting_in", self._on_counting_in)
         dispatcher.map("/live/song/get/num_tracks", self._on_num_tracks)
         dispatcher.map("/live/track/get/arm", self._on_arm)
         dispatcher.map("/live/track/get/name", self._on_name)
@@ -200,3 +232,5 @@ class OscListener:
             self._on_name(address, *args)
         elif address == "/live/view/get/selected_track":
             self._on_selected_track(address, *[int(a) for a in args])
+        elif address == "/live/song/get/is_counting_in":
+            self._on_counting_in(address, *[int(a) for a in args])

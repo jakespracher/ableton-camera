@@ -80,11 +80,11 @@ def main(argv: list[str] | None = None) -> int:
         config.obs.password,
         config.staging_dir,
     )
-    recorder: Recorder | None = None
-
     def on_edge(edge: RecordingEdge, signals: RecordingSignals) -> None:
-        assert recorder is not None
         recorder.on_edge(edge, signals)
+
+    def on_count_in_finished(signals: RecordingSignals) -> None:
+        recorder.on_count_in_finished(signals)
 
     listener = OscListener(
         config.osc.send_host,
@@ -92,6 +92,7 @@ def main(argv: list[str] | None = None) -> int:
         config.osc.listen_host,
         config.osc.listen_port,
         on_edge,
+        on_count_in_finished=on_count_in_finished,
     )
     metadata = LiveOscQuery(listener)
     recorder = Recorder(
@@ -101,6 +102,7 @@ def main(argv: list[str] | None = None) -> int:
         config.staging_dir,
         track_merge=config.track_merge,
     )
+    recorder.set_counting_in_probe(listener.fetch_counting_in)
 
     def shutdown(_signum=None, _frame=None) -> None:
         logger.info("Shutting down...")

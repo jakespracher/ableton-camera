@@ -31,25 +31,50 @@ class Recorder:
         self._track_merge = track_merge
         self._clock = clock or (lambda: datetime.now().astimezone())
         self._is_recording = False
+        self._pending_obs_start = False
         self._started_at: datetime | None = None
         self._track_label: str | None = None
+        self._is_counting_in: Callable[[], bool] | None = None
 
     @property
     def is_recording(self) -> bool:
         return self._is_recording
 
-    def on_edge(self, edge: RecordingEdge, _signals: RecordingSignals) -> None:
-        if edge is RecordingEdge.STARTED:
-            self._on_start()
-        elif edge is RecordingEdge.STOPPED:
-            self._on_stop()
+    def set_counting_in_probe(self, probe: Callable[[], bool]) -> None:
+        self._is_counting_in = probe
 
-    def _on_start(self) -> None:
-        if self._is_recording:
-            logger.debug("Already recording; ignoring duplicate start")
+    def on_edge(self, edge: RecordingEdge, signals: RecordingSignals) -> None:
+        if edge is RecordingEdge.STARTED:
+            self._on_live_start()
+        elif edge is RecordingEdge.STOPPED:
+            self._on_stop(signals)
+
+    def on_count_in_finished(self, signals: RecordingSignals) -> None:
+        """Called when Live leaves count-in while a take is armed."""
+        if self._pending_obs_start and signals.active:
+            self._start_obs()
+
+    def _on_live_start(self) -> None:
+        if self._is_recording or self._pending_obs_start:
+            logger.debug("Already recording or waiting for count-in; ignoring start")
             return
         self._track_label = resolve_track_label(self._metadata, self._track_merge)
-        self._started_at = self._clock()
+        counting_in = self._is_counting_in() if self._is_counting_in else False
+        if counting_in:
+            self._pending_obs_start = True
+            logger.info(
+                "Live count-in active; deferring OBS until count-in finishes (track %s)",
+                self._track_label,
+            )
+            return
+        self._start_obs()
+
+    def _start_obs(self) -> None:
+        if self._is_recording:
+            return
+        self._pending_obs_start = False
+        if self._started_at is None:
+            self._started_at = self._clock()
         try:
             self._obs.start_record()
             self._is_recording = True
@@ -58,10 +83,14 @@ class Recorder:
             logger.exception("Failed to start OBS recording")
             self._track_label = None
             self._started_at = None
+            self._pending_obs_start = False
 
-    def _on_stop(self) -> None:
+    def _on_stop(self, _signals: RecordingSignals) -> None:
+        self._pending_obs_start = False
         if not self._is_recording:
             logger.debug("Not recording; ignoring stop")
+            self._track_label = None
+            self._started_at = None
             return
         self._is_recording = False
         track = self._track_label or "UnknownTrack"
