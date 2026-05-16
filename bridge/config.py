@@ -44,14 +44,21 @@ class AppConfig:
                 listen_port=int(osc["listen_port"]),
             ),
             obs=ObsConfig(
-                host=str(obs["host"]),
-                port=int(obs["port"]),
-                password=str(obs.get("password", "")),
+                host=_obs_host(obs),
+                port=int(obs.get("port", 4455)),
+                password=str(obs.get("password") or ""),
             ),
             staging_dir=Path(paths["staging_dir"]).expanduser(),
             track_merge=str(naming.get("track_merge", "_")),
             output_dir=None,
         )
+
+
+def _obs_host(obs: dict[str, Any]) -> str:
+    raw = obs.get("host")
+    if raw is None or str(raw).strip() in ("", "None", "null"):
+        return "127.0.0.1"
+    return str(raw).strip()
 
 
 def load_config(path: Path) -> AppConfig:

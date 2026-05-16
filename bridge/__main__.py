@@ -71,6 +71,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     logger.info("Output folder: %s", config.output_dir)
+    logger.info("Config: %s", args.config.resolve())
+    logger.info("OBS WebSocket: %s:%s", config.obs.host, config.obs.port)
 
     obs = ObsClientReal(
         config.obs.host,
