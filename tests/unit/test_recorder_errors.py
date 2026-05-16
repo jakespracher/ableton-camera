@@ -16,9 +16,9 @@ def test_stop_without_staged_file_logs_and_does_not_crash(output_dir, staging_di
     metadata = FakeOscQuery(num_tracks=1, armed={0: True}, names={0: "Vocals"})
     recorder = Recorder(obs, metadata, output_dir, staging_dir)
 
-    recorder.on_edge(RecordingEdge.STARTED, RecordingSignals(1, 0))
+    recorder.on_edge(RecordingEdge.STARTED, RecordingSignals(1, 0, False))
     with caplog.at_level("ERROR"):
-        recorder.on_edge(RecordingEdge.STOPPED, RecordingSignals(0, 0))
+        recorder.on_edge(RecordingEdge.STOPPED, RecordingSignals(0, 0, False))
     assert "No recording file" in caplog.text
 
 
@@ -28,5 +28,5 @@ def test_start_obs_failure_resets_state(output_dir, staging_dir):
     metadata = FakeOscQuery(num_tracks=1, armed={0: True}, names={0: "Vocals"})
     recorder = Recorder(obs, metadata, output_dir, staging_dir)
 
-    recorder.on_edge(RecordingEdge.STARTED, RecordingSignals(1, 0))
+    recorder.on_edge(RecordingEdge.STARTED, RecordingSignals(1, 0, False))
     assert recorder.is_recording is False

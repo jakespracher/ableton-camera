@@ -47,6 +47,13 @@ class OscListener:
         self._session_status = 0
         self._counting_in = False
         self._count_in_event = threading.Event()
+        self._clip_recording = False
+        self._clip_poll_thread: Thread | None = None
+        self._stop_clip_poll = threading.Event()
+        self._clip_reply_event = threading.Event()
+        self._clip_reply_value: bool | None = None
+        self._slot_reply_event = threading.Event()
+        self._slot_reply_value: int | None = None
         self._server: BlockingOSCUDPServer | None = None
         self._thread: Thread | None = None
         self._lock = threading.Lock()
@@ -63,7 +70,7 @@ class OscListener:
 
     @property
     def signals(self) -> RecordingSignals:
-        return RecordingSignals(self._arrangement, self._session_status)
+        return RecordingSignals(self._arrangement, self._session_status, self._clip_recording)
 
     def subscribe(self) -> None:
         self._send("/live/song/start_listen/record_mode")
@@ -130,6 +137,96 @@ class OscListener:
         self._send("/live/song/get/is_counting_in")
         self._wait_count_in(timeout_s)
         return self._counting_in
+
+    def _on_clip_is_recording(self, _address: str, *args: int) -> None:
+        if len(args) >= 3:
+            self._clip_reply_value = bool(int(args[2]))
+            self._clip_reply_event.set()
+
+    def _on_playing_slot(self, _address: str, *args: int) -> None:
+        if len(args) >= 2:
+            self._slot_reply_value = int(args[1])
+            self._slot_reply_event.set()
+
+    def _on_fired_slot(self, _address: str, *args: int) -> None:
+        if len(args) >= 2:
+            self._slot_reply_value = int(args[1])
+            self._slot_reply_event.set()
+
+    def _wait_clip_reply(self, timeout_s: float) -> None:
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            if self._clip_reply_event.wait(timeout=0.05):
+                self._clip_reply_event.clear()
+                return
+
+    def _wait_slot_reply(self, timeout_s: float) -> None:
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            if self._slot_reply_event.wait(timeout=0.05):
+                self._slot_reply_event.clear()
+                return
+
+    def fetch_clip_is_recording(self, track_id: int, clip_id: int, timeout_s: float) -> bool:
+        self._clip_reply_value = None
+        self._clip_reply_event.clear()
+        self._send("/live/clip/get/is_recording", track_id, clip_id)
+        self._wait_clip_reply(timeout_s)
+        return bool(self._clip_reply_value)
+
+    def fetch_playing_slot_index(self, track_id: int, timeout_s: float) -> int:
+        self._slot_reply_value = None
+        self._slot_reply_event.clear()
+        self._send("/live/track/get/playing_slot_index", track_id)
+        self._wait_slot_reply(timeout_s)
+        if self._slot_reply_value is None:
+            return -1
+        return int(self._slot_reply_value)
+
+    def fetch_fired_slot_index(self, track_id: int, timeout_s: float) -> int:
+        self._slot_reply_value = None
+        self._slot_reply_event.clear()
+        self._send("/live/track/get/fired_slot_index", track_id)
+        self._wait_slot_reply(timeout_s)
+        if self._slot_reply_value is None:
+            return -1
+        return int(self._slot_reply_value)
+
+    def _scan_clip_recording(self) -> bool:
+        from bridge.osc_clip_probe import LiveOscClipProbe
+
+        return LiveOscClipProbe(self).any_recording()
+
+    def _clip_poll_loop(self, interval_s: float) -> None:
+        while not self._stop_clip_poll.is_set():
+            try:
+                clip_active = self._scan_clip_recording()
+            except Exception:
+                logger.exception("Clip recording scan failed")
+                clip_active = self._clip_recording
+            if clip_active != self._clip_recording:
+                self._clip_recording = clip_active
+                logger.debug("clip_recording=%s", clip_active)
+                self._dispatch_edges()
+            self._stop_clip_poll.wait(interval_s)
+
+    def start_clip_poll(self, interval_s: float = 0.15) -> None:
+        self.stop_clip_poll()
+        self._stop_clip_poll.clear()
+        self._clip_recording = self._scan_clip_recording()
+        self._clip_poll_thread = Thread(
+            target=self._clip_poll_loop,
+            args=(interval_s,),
+            daemon=True,
+            name="clip-recording-poll",
+        )
+        self._clip_poll_thread.start()
+
+    def stop_clip_poll(self) -> None:
+        self._stop_clip_poll.set()
+        if self._clip_poll_thread:
+            self._clip_poll_thread.join(timeout=2)
+            self._clip_poll_thread = None
 
     def _on_num_tracks(self, _address: str, *args: int) -> None:
         if args:
@@ -205,14 +302,19 @@ class OscListener:
         dispatcher.map("/live/track/get/arm", self._on_arm)
         dispatcher.map("/live/track/get/name", self._on_name)
         dispatcher.map("/live/view/get/selected_track", self._on_selected_track)
+        dispatcher.map("/live/clip/get/is_recording", self._on_clip_is_recording)
+        dispatcher.map("/live/track/get/playing_slot_index", self._on_playing_slot)
+        dispatcher.map("/live/track/get/fired_slot_index", self._on_fired_slot)
         self._server = ReuseAddrOSCUDPServer((self._listen_host, self._listen_port), dispatcher)
         self._thread = Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
         self.subscribe()
+        self.start_clip_poll()
         for edge in self.apply_boot_sync():
             self._on_edge(edge, self.signals)
 
     def stop(self) -> None:
+        self.stop_clip_poll()
         if self._server:
             self._server.shutdown()
         if self._thread:

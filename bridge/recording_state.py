@@ -13,10 +13,13 @@ class RecordingEdge(Enum):
 class RecordingSignals:
     arrangement: int
     session_status: int
+    clip_recording: bool = False
 
     @property
     def active(self) -> bool:
-        return self.arrangement == 1 or self.session_status != 0
+        # Arrangement: follow transport record. Session clips: follow clip.is_recording
+        # so OBS stops after the quantized bar, not when the stop button is pressed.
+        return bool(self.arrangement == 1 or self.clip_recording)
 
 
 @dataclass

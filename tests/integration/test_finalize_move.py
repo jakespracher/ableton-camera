@@ -21,7 +21,7 @@ def test_finalize_moves_not_copies(output_dir, staging_dir):
         staging_dir,
         clock=clock,
     )
-    recorder.on_edge(RecordingEdge.STARTED, RecordingSignals(1, 0))
-    recorder.on_edge(RecordingEdge.STOPPED, RecordingSignals(0, 0))
+    recorder.on_edge(RecordingEdge.STARTED, RecordingSignals(1, 0, False))
+    recorder.on_edge(RecordingEdge.STOPPED, RecordingSignals(0, 0, False))
     assert not staged.exists()
     assert len(list(output_dir.iterdir())) == 1

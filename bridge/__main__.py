@@ -106,7 +106,7 @@ def main(argv: list[str] | None = None) -> int:
 
     def shutdown(_signum=None, _frame=None) -> None:
         logger.info("Shutting down...")
-        listener.stop()
+        listener.stop()  # also stops clip poll thread
         sys.exit(0)
 
     signal.signal(signal.SIGINT, shutdown)

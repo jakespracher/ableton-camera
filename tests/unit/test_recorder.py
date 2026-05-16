@@ -26,10 +26,10 @@ def test_start_stop_moves_file_to_output(output_dir: Path, staging_dir: Path):
         clock=clock,
     )
 
-    recorder.on_edge(RecordingEdge.STARTED, RecordingSignals(1, 0))
+    recorder.on_edge(RecordingEdge.STARTED, RecordingSignals(1, 0, False))
     assert obs.recording is True
 
-    recorder.on_edge(RecordingEdge.STOPPED, RecordingSignals(0, 0))
+    recorder.on_edge(RecordingEdge.STOPPED, RecordingSignals(0, 0, False))
     dest = output_dir / "Vocals_2026-05-16_143022.mkv"
     assert dest.is_file()
     assert not staged.exists()
@@ -41,8 +41,8 @@ def test_duplicate_start_ignored(output_dir: Path, staging_dir: Path):
     metadata = FakeOscQuery(num_tracks=1, armed={0: True}, names={0: "Vocals"})
     recorder = Recorder(obs, metadata, output_dir, staging_dir)
 
-    recorder.on_edge(RecordingEdge.STARTED, RecordingSignals(1, 0))
-    recorder.on_edge(RecordingEdge.STARTED, RecordingSignals(1, 0))
+    recorder.on_edge(RecordingEdge.STARTED, RecordingSignals(1, 0, False))
+    recorder.on_edge(RecordingEdge.STARTED, RecordingSignals(1, 0, False))
     assert obs.calls.count("start") == 1
 
 
@@ -64,8 +64,8 @@ def test_second_take_distinct_filenames(output_dir: Path, staging_dir: Path):
         staged = staging_dir / f"take{idx['i']}.mkv"
         staged.write_bytes(b"v")
         obs.set_staged_file(staged)
-        recorder.on_edge(RecordingEdge.STARTED, RecordingSignals(1, 0))
-        recorder.on_edge(RecordingEdge.STOPPED, RecordingSignals(0, 0))
+        recorder.on_edge(RecordingEdge.STARTED, RecordingSignals(1, 0, False))
+        recorder.on_edge(RecordingEdge.STOPPED, RecordingSignals(0, 0, False))
         idx["i"] += 1
 
     files = list(output_dir.glob("*.mkv"))

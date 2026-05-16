@@ -13,7 +13,7 @@ def test_defers_obs_start_during_count_in(output_dir, staging_dir):
         staging_dir,
     )
     recorder.set_counting_in_probe(lambda: True)
-    recorder.on_edge(RecordingEdge.STARTED, RecordingSignals(1, 0))
+    recorder.on_edge(RecordingEdge.STARTED, RecordingSignals(1, 0, False))
     assert obs.calls == []
     assert recorder._pending_obs_start is True
 
@@ -27,8 +27,8 @@ def test_starts_obs_after_count_in_finishes(output_dir, staging_dir):
         staging_dir,
     )
     recorder.set_counting_in_probe(lambda: True)
-    recorder.on_edge(RecordingEdge.STARTED, RecordingSignals(1, 0))
-    recorder.on_count_in_finished(RecordingSignals(1, 0))
+    recorder.on_edge(RecordingEdge.STARTED, RecordingSignals(1, 0, False))
+    recorder.on_count_in_finished(RecordingSignals(1, 0, False))
     assert obs.calls == ["start"]
 
 
@@ -41,5 +41,5 @@ def test_starts_immediately_when_not_counting_in(output_dir, staging_dir):
         staging_dir,
     )
     recorder.set_counting_in_probe(lambda: False)
-    recorder.on_edge(RecordingEdge.STARTED, RecordingSignals(1, 0))
+    recorder.on_edge(RecordingEdge.STARTED, RecordingSignals(1, 0, False))
     assert obs.calls == ["start"]

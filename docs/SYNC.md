@@ -105,6 +105,21 @@ You do **not** need Ableton Link for this.
 
 ---
 
+## Session clip stop (quantized bar tail)
+
+When you stop a **session clip** with the slot stop button, Live keeps recording audio until the next **quantization** boundary (global **Clip Trigger Quantization** or per-clip launch quantization). The bridge used to stop OBS as soon as the transport/session flag dropped, so **video ended early**.
+
+**Now:** OBS keeps recording while any clip has `is_recording` true (polled from AbletonOSC). That matches the end of the bar in most setups.
+
+Readable from Live via OSC:
+
+- `/live/song/get/clip_trigger_quantization` — global grid (0=None, 4=1 Bar, etc.)
+- `/live/clip/get/launch_quantization` — per-clip override
+
+You do not need to enter this manually unless clip polling fails; then set a fallback in config (future).
+
+---
+
 ## Count-in (3 beats ≈ 2 s at 90 BPM)
 
 If Ableton’s **metronome count-in** is on, the bridge **waits until count-in finishes** before starting OBS (when `is_counting_in` is available via AbletonOSC).

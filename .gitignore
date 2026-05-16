@@ -1,7 +1,10 @@
 .venv/
 *.egg-info/
+.coverage
+htmlcov/
 __pycache__/
 *.pyc
 .DS_Store
 config.local.yaml
 .env
+.cache/
