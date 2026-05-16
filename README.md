@@ -10,4 +10,13 @@ Sync video recording (iPhone via Continuity Camera → OBS on Mac) with Ableton 
 
 ## Status
 
-Planning only — not implemented yet.
+MVP bridge implemented; see [Build plan](docs/PLAN.md). Run tests: `pip install -e ".[dev]" && pytest`.
+
+## Quick start
+
+1. Install [AbletonOSC](https://github.com/ideoforms/AbletonOSC) and enable it in Live’s Control Surface preferences.
+2. Enable OBS WebSocket; set OBS to record into a staging folder (see `config.example.yaml`).
+3. `pip install -e .`
+4. `ableton-camera` (or `python -m bridge`) — pick output folder, then record in Live (arrangement or session).
+
+Use `--output-dir /path/to/folder` to skip the picker. Copy `config.example.yaml` to `config.local.yaml` for OBS password and paths.

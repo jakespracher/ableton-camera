@@ -1,0 +1,16 @@
+osc:
+  send_host: 127.0.0.1
+  send_port: 11000
+  listen_host: 127.0.0.1
+  listen_port: 11001
+
+obs:
+  host: 127.0.0.1
+  port: 4455
+  password: ""
+
+paths:
+  staging_dir: ~/Movies/OBS-Staging
+
+naming:
+  track_merge: "_"

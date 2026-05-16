@@ -1,0 +1,48 @@
+[project]
+name = "ableton-camera"
+version = "0.1.0"
+description = "Sync OBS recording with Ableton Live via AbletonOSC"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "obsws-python>=1.7",
+    "python-osc>=1.9",
+    "pyyaml>=6",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-cov>=5",
+    "pytest-mock>=3",
+    "freezegun>=1.4",
+]
+
+[project.scripts]
+ableton-camera = "bridge.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["bridge*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+    "integration: uses threads, UDP, or filesystem timing",
+    "obs: requires running OBS with WebSocket",
+    "live: requires Ableton Live + AbletonOSC",
+]
+addopts = "-m 'not obs and not live'"
+
+[tool.coverage.run]
+source = ["bridge"]
+omit = ["bridge/__main__.py"]
+
+[tool.coverage.report]
+fail_under = 85
+omit = ["bridge/__main__.py"]
