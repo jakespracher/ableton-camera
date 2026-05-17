@@ -11,9 +11,13 @@ PARTIAL_SUFFIXES = (".part", ".tmp", ".partial")
 
 
 class ObsClient(Protocol):
+    def is_recording(self) -> bool: ...
+
     def start_record(self) -> None: ...
 
     def stop_record(self) -> Path | None: ...
+
+    def stop_orphan_recording(self) -> bool: ...
 
 
 def newest_file_in_dir(directory: Path, *, ignore_suffixes: tuple[str, ...] = PARTIAL_SUFFIXES) -> Path | None:
@@ -59,6 +63,16 @@ def wait_for_stable_file(
     return last_path
 
 
+def _record_output_active(response: object) -> bool:
+    active = getattr(response, "output_active", None)
+    if active is not None:
+        return bool(active)
+    datain = getattr(response, "datain", None)
+    if isinstance(datain, dict):
+        return bool(datain.get("outputActive"))
+    return False
+
+
 class ObsClientReal:
     def __init__(self, host: str, port: int, password: str, staging_dir: Path) -> None:
         self._host = host
@@ -80,8 +94,24 @@ class ObsClientReal:
         )
         return self._client
 
+    def is_recording(self) -> bool:
+        try:
+            response = self._connect().get_record_status()
+        except Exception:
+            logger.exception("Failed to query OBS record status")
+            raise
+        return _record_output_active(response)
+
     def start_record(self) -> None:
         self._connect().start_record()
+
+    def stop_orphan_recording(self) -> bool:
+        """Stop OBS if it was left recording (e.g. after a bridge crash)."""
+        if not self.is_recording():
+            return False
+        logger.warning("OBS was still recording; stopping orphaned capture")
+        self.stop_record()
+        return True
 
     def stop_record(self) -> Path | None:
         client = self._connect()

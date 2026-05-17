@@ -43,6 +43,27 @@ def test_session_record_engaged_fires_start():
     assert RecordingEdge.STARTED in edges
 
 
+def test_session_disengage_stops_obs_when_idle():
+    edges: list[RecordingEdge] = []
+    obs_recording = [True]
+
+    listener = OscListener(
+        "127.0.0.1",
+        11000,
+        "127.0.0.1",
+        11001,
+        lambda edge, _signals: edges.append(edge),
+        is_obs_recording=lambda: obs_recording[0],
+    )
+    listener._clip_recording = False
+    listener.inject("/live/song/get/session_record_status", 1)
+    assert RecordingEdge.STARTED in edges
+    obs_recording[0] = True
+    listener.inject("/live/song/get/session_record_status", 0)
+    assert edges[-1] == RecordingEdge.STOPPED
+    obs_recording[0] = False
+
+
 def test_clip_tail_keeps_stop_active_after_session_off():
     edges: list[RecordingEdge] = []
     listener = OscListener(

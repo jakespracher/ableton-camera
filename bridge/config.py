@@ -28,6 +28,7 @@ class AppConfig:
     obs: ObsConfig
     staging_dir: Path
     track_merge: str
+    project_name: str
     output_dir: Path | None = None
 
     @classmethod
@@ -50,6 +51,7 @@ class AppConfig:
             ),
             staging_dir=Path(paths["staging_dir"]).expanduser(),
             track_merge=str(naming.get("track_merge", "_")),
+            project_name=str(naming.get("project", "") or "").strip(),
             output_dir=None,
         )
 

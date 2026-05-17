@@ -25,3 +25,6 @@ class LiveOscQuery(OscQuery):
 
     def get_selected_track_index(self) -> int:
         return self._listener.fetch_selected_track(self._timeout_s)
+
+    def get_recording_track_index(self) -> int | None:
+        return self._listener.fetch_recording_track_index(self._timeout_s)

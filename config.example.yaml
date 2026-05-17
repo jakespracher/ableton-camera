@@ -14,3 +14,6 @@ paths:
 
 naming:
   track_merge: "_"
+  # Subfolder under the output directory: output_dir/{project}/track_timestamp.ext
+  # Defaults to today's date (YYYY-MM-DD) when empty. Override: --project "My Album"
+  project: ""

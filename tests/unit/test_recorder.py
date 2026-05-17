@@ -46,6 +46,22 @@ def test_duplicate_start_ignored(output_dir: Path, staging_dir: Path):
     assert obs.calls.count("start") == 1
 
 
+def test_saves_under_project_subfolder(output_dir: Path, staging_dir: Path):
+    from bridge.naming import resolve_output_dir
+
+    project_dir = resolve_output_dir(output_dir, "My Album")
+    obs = FakeObsClient(staging_dir)
+    staged = staging_dir / "take.mkv"
+    staged.write_bytes(b"fake")
+    obs.set_staged_file(staged)
+    metadata = FakeOscQuery(num_tracks=1, armed={0: True}, names={0: "Vocals"})
+    recorder = Recorder(obs, metadata, project_dir, staging_dir)
+    recorder.on_edge(RecordingEdge.STARTED, RecordingSignals(1, 0, False))
+    recorder.on_edge(RecordingEdge.STOPPED, RecordingSignals(0, 0, False))
+    assert list(project_dir.glob("Vocals_*.mkv"))
+    assert not list(output_dir.glob("*.mkv"))
+
+
 def test_second_take_distinct_filenames(output_dir: Path, staging_dir: Path):
     obs = FakeObsClient(staging_dir)
     metadata = FakeOscQuery(num_tracks=1, armed={0: True}, names={0: "Vocals"})

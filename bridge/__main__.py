@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from bridge.config import AppConfig, load_config
+from bridge.naming import default_project_name, resolve_output_dir
 from bridge.obs_client import ObsClientReal
 from bridge.osc_client import OscListener
 from bridge.osc_query import LiveOscQuery
@@ -42,6 +43,13 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Skip picker and use this output directory",
     )
+    parser.add_argument(
+        "--project",
+        type=str,
+        default=None,
+        metavar="NAME",
+        help="Project subfolder under the output directory (e.g. output/MyAlbum/Vocals_....mkv)",
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
 
@@ -70,7 +78,13 @@ def main(argv: list[str] | None = None) -> int:
         logger.error("%s", exc)
         return 1
 
-    logger.info("Output folder: %s", config.output_dir)
+    project_name = (args.project if args.project is not None else config.project_name).strip()
+    if not project_name:
+        project_name = default_project_name()
+    session_output_dir = resolve_output_dir(config.output_dir, project_name)
+
+    logger.info("Output folder: %s", session_output_dir)
+    logger.info("Project: %s (under %s)", project_name, config.output_dir)
     logger.info("Config: %s", args.config.resolve())
     logger.info("OBS WebSocket: %s:%s", config.obs.host, config.obs.port)
 
@@ -112,11 +126,12 @@ def main(argv: list[str] | None = None) -> int:
     recorder = Recorder(
         obs,
         metadata,
-        config.output_dir,
+        session_output_dir,
         config.staging_dir,
         track_merge=config.track_merge,
     )
     recorder.set_counting_in_probe(listener.fetch_counting_in)
+    listener.set_obs_recording_probe(lambda: recorder.is_recording)
 
     def shutdown(_signum=None, _frame=None) -> None:
         logger.info("Shutting down...")
@@ -125,6 +140,15 @@ def main(argv: list[str] | None = None) -> int:
 
     signal.signal(signal.SIGINT, shutdown)
     signal.signal(signal.SIGTERM, shutdown)
+
+    try:
+        if obs.stop_orphan_recording():
+            logger.info("Cleared orphaned OBS recording from a previous session")
+    except Exception:
+        logger.exception(
+            "Could not check OBS record status; ensure OBS is running and WebSocket is enabled"
+        )
+        return 1
 
     try:
         listener.start()

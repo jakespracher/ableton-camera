@@ -10,6 +10,47 @@ def test_newest_empty_dir(tmp_path):
     assert newest_file_in_dir(tmp_path) is None
 
 
+def test_is_recording_reads_output_active(tmp_path):
+    mock_ws = MagicMock()
+    status = MagicMock()
+    status.output_active = True
+    mock_ws.get_record_status.return_value = status
+
+    with patch("obsws_python.ReqClient", return_value=mock_ws):
+        client = ObsClientReal("127.0.0.1", 4455, "", tmp_path)
+        assert client.is_recording() is True
+
+    status.output_active = None
+    status.datain = {"outputActive": False}
+    assert client.is_recording() is False
+
+
+def test_stop_orphan_recording_when_active(tmp_path):
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    mock_ws = MagicMock()
+    status = MagicMock()
+    status.output_active = True
+    mock_ws.get_record_status.return_value = status
+    stop_resp = MagicMock()
+    stop_resp.output_path = str(staging / "orphan.mkv")
+    mock_ws.stop_record.return_value = stop_resp
+
+    def stop_and_clear_recording():
+        status.output_active = False
+        return stop_resp
+
+    mock_ws.stop_record.side_effect = stop_and_clear_recording
+
+    with patch("obsws_python.ReqClient", return_value=mock_ws):
+        client = ObsClientReal("127.0.0.1", 4455, "", staging)
+        (staging / "orphan.mkv").write_bytes(b"x")
+        assert client.stop_orphan_recording() is True
+        assert client.stop_orphan_recording() is False
+
+    mock_ws.stop_record.assert_called_once()
+
+
 def test_obs_client_real_start_stop(tmp_path):
     staging = tmp_path / "staging"
     staging.mkdir()

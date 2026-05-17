@@ -34,6 +34,7 @@ class OscListener:
         listen_port: int,
         on_edge: RecordingHandler,
         on_count_in_finished: Callable[[RecordingSignals], None] | None = None,
+        is_obs_recording: Callable[[], bool] | None = None,
     ) -> None:
         self._send_host = send_host
         self._send_port = send_port
@@ -41,6 +42,7 @@ class OscListener:
         self._listen_port = listen_port
         self._on_edge = on_edge
         self._on_count_in_finished = on_count_in_finished
+        self._is_obs_recording = is_obs_recording
         self._client = SimpleUDPClient(send_host, send_port)
         self._state = RecordingStateMachine()
         self._arrangement = 0
@@ -52,6 +54,8 @@ class OscListener:
         self._stop_clip_poll = threading.Event()
         self._clip_reply_event = threading.Event()
         self._clip_reply_value: bool | None = None
+        self._has_clip_reply_event = threading.Event()
+        self._has_clip_reply_value: bool | None = None
         self._slot_reply_event = threading.Event()
         self._slot_reply_value: int | None = None
         self._server: BlockingOSCUDPServer | None = None
@@ -62,6 +66,8 @@ class OscListener:
         self._names: dict[int, str] = {}
         self._selected_track: int | None = None
         self._meta_event = threading.Event()
+        self._query_lock = threading.RLock()
+        self._last_recording_slots: dict[int, int] = {}
 
     @property
     def sent_messages(self) -> list[tuple[str, list]]:
@@ -86,6 +92,9 @@ class OscListener:
     def is_counting_in(self) -> bool:
         return self._counting_in
 
+    def set_obs_recording_probe(self, probe: Callable[[], bool]) -> None:
+        self._is_obs_recording = probe
+
     def _send(self, address: str, *args: int | float | str) -> None:
         payload = list(args) if args else []
         log = getattr(self, "_sent_log", None)
@@ -108,6 +117,16 @@ class OscListener:
         for edge in self._state.apply(self.signals):
             self._on_edge(edge, self.signals)
 
+    def _stop_obs_if_idle(self) -> None:
+        """Stop OBS when Live is no longer writing audio but we missed the STOP edge."""
+        if self.signals.stop_active:
+            return
+        if self._is_obs_recording is None or not self._is_obs_recording():
+            return
+        logger.info("Live idle but OBS still recording; forcing stop")
+        self._state.was_active = False
+        self._on_edge(RecordingEdge.STOPPED, self.signals)
+
     def _on_record_mode(self, address: str, *args: int) -> None:
         self.handle_record_mode(address, *args)
         self._dispatch_edges()
@@ -119,6 +138,9 @@ class OscListener:
         if self._session_status != 0 and prev == 0:
             self._on_edge(RecordingEdge.STARTED, self.signals)
         self._dispatch_edges()
+        # Session disengaged with no arrangement/clip tail: state machine may never have armed.
+        if self._session_status == 0 and prev != 0:
+            self._stop_obs_if_idle()
 
     def _on_counting_in(self, _address: str, *args: int) -> None:
         if not args:
@@ -137,15 +159,21 @@ class OscListener:
                 return
 
     def fetch_counting_in(self, timeout_s: float = 0.5) -> bool:
-        self._count_in_event.clear()
-        self._send("/live/song/get/is_counting_in")
-        self._wait_count_in(timeout_s)
-        return self._counting_in
+        with self._query_lock:
+            self._count_in_event.clear()
+            self._send("/live/song/get/is_counting_in")
+            self._wait_count_in(timeout_s)
+            return self._counting_in
 
     def _on_clip_is_recording(self, _address: str, *args: int) -> None:
         if len(args) >= 3:
             self._clip_reply_value = bool(int(args[2]))
             self._clip_reply_event.set()
+
+    def _on_has_clip(self, _address: str, *args: int) -> None:
+        if len(args) >= 3:
+            self._has_clip_reply_value = bool(int(args[2]))
+            self._has_clip_reply_event.set()
 
     def _on_playing_slot(self, _address: str, *args: int) -> None:
         if len(args) >= 2:
@@ -172,35 +200,74 @@ class OscListener:
                 return
 
     def fetch_clip_is_recording(self, track_id: int, clip_id: int, timeout_s: float) -> bool:
-        with self._lock:
-            self._clip_reply_value = None
-        self._clip_reply_event.clear()
-        self._send("/live/clip/get/is_recording", track_id, clip_id)
-        self._wait_clip_reply(timeout_s)
-        with self._lock:
-            return bool(self._clip_reply_value)
+        with self._query_lock:
+            with self._lock:
+                self._clip_reply_value = None
+            self._clip_reply_event.clear()
+            self._send("/live/clip/get/is_recording", track_id, clip_id)
+            self._wait_clip_reply(timeout_s)
+            with self._lock:
+                return bool(self._clip_reply_value)
+
+    def _wait_has_clip_reply(self, timeout_s: float) -> None:
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            if self._has_clip_reply_event.wait(timeout=0.05):
+                self._has_clip_reply_event.clear()
+                return
+
+    def fetch_clip_slot_has_clip(self, track_id: int, clip_id: int, timeout_s: float) -> bool:
+        with self._query_lock:
+            with self._lock:
+                self._has_clip_reply_value = None
+            self._has_clip_reply_event.clear()
+            self._send("/live/clip_slot/get/has_clip", track_id, clip_id)
+            self._wait_has_clip_reply(timeout_s)
+            with self._lock:
+                return bool(self._has_clip_reply_value)
 
     def fetch_playing_slot_index(self, track_id: int, timeout_s: float) -> int:
-        with self._lock:
-            self._slot_reply_value = None
-        self._slot_reply_event.clear()
-        self._send("/live/track/get/playing_slot_index", track_id)
-        self._wait_slot_reply(timeout_s)
-        with self._lock:
-            if self._slot_reply_value is None:
-                return -1
-            return int(self._slot_reply_value)
+        with self._query_lock:
+            with self._lock:
+                self._slot_reply_value = None
+            self._slot_reply_event.clear()
+            self._send("/live/track/get/playing_slot_index", track_id)
+            self._wait_slot_reply(timeout_s)
+            with self._lock:
+                if self._slot_reply_value is None:
+                    return -1
+                return int(self._slot_reply_value)
 
     def fetch_fired_slot_index(self, track_id: int, timeout_s: float) -> int:
-        with self._lock:
-            self._slot_reply_value = None
-        self._slot_reply_event.clear()
-        self._send("/live/track/get/fired_slot_index", track_id)
-        self._wait_slot_reply(timeout_s)
-        with self._lock:
-            if self._slot_reply_value is None:
-                return -1
-            return int(self._slot_reply_value)
+        with self._query_lock:
+            with self._lock:
+                self._slot_reply_value = None
+            self._slot_reply_event.clear()
+            self._send("/live/track/get/fired_slot_index", track_id)
+            self._wait_slot_reply(timeout_s)
+            with self._lock:
+                if self._slot_reply_value is None:
+                    return -1
+                return int(self._slot_reply_value)
+
+    def fetch_recording_track_index(self, timeout_s: float) -> int | None:
+        """Track index for a session clip that is currently recording, if any."""
+        from bridge.clip_recording import _slots_to_check
+        from bridge.osc_clip_probe import LiveOscClipProbe
+
+        with self._query_lock:
+            probe = LiveOscClipProbe(self)
+            for track_id in range(probe.get_num_tracks()):
+                for clip_id in _slots_to_check(
+                    probe,
+                    track_id,
+                    last_slots=self._last_recording_slots,
+                ):
+                    if probe.clip_slot_has_clip(track_id, clip_id) and probe.clip_is_recording(
+                        track_id, clip_id
+                    ):
+                        return track_id
+        return None
 
     def _scan_clip_recording(self) -> bool:
         from bridge.osc_clip_probe import LiveOscClipProbe
@@ -215,9 +282,12 @@ class OscListener:
                 logger.exception("Clip recording scan failed")
                 clip_active = self._clip_recording
             if clip_active != self._clip_recording:
+                was_clip = self._clip_recording
                 self._clip_recording = clip_active
                 logger.info("clip_recording=%s", clip_active)
                 self._dispatch_edges()
+                if was_clip and not clip_active:
+                    self._stop_obs_if_idle()
             self._stop_clip_poll.wait(interval_s)
 
     def start_clip_poll(self, interval_s: float = 0.15) -> None:
@@ -276,36 +346,46 @@ class OscListener:
                 return
 
     def fetch_num_tracks(self, timeout_s: float) -> int:
-        with self._lock:
-            self._num_tracks = None
-        self._meta_event.clear()
-        self._send("/live/song/get/num_tracks")
-        self._wait_meta(timeout_s)
-        with self._lock:
-            return self._num_tracks if self._num_tracks is not None else 0
+        with self._query_lock:
+            with self._lock:
+                self._num_tracks = None
+            self._meta_event.clear()
+            self._send("/live/song/get/num_tracks")
+            self._wait_meta(timeout_s)
+            with self._lock:
+                return self._num_tracks if self._num_tracks is not None else 0
 
     def fetch_arm(self, track_id: int, timeout_s: float) -> bool:
-        self._meta_event.clear()
-        self._send("/live/track/get/arm", track_id)
-        self._wait_meta(timeout_s)
-        with self._lock:
-            return self._arms.get(track_id, False)
+        with self._query_lock:
+            with self._lock:
+                self._arms.pop(track_id, None)
+            self._meta_event.clear()
+            self._send("/live/track/get/arm", track_id)
+            self._wait_meta(timeout_s)
+            with self._lock:
+                return self._arms.get(track_id, False)
 
     def fetch_track_name(self, track_id: int, timeout_s: float) -> str:
-        self._meta_event.clear()
-        self._send("/live/track/get/name", track_id)
-        self._wait_meta(timeout_s)
-        with self._lock:
-            return self._names.get(track_id, "")
+        with self._query_lock:
+            with self._lock:
+                self._names.pop(track_id, None)
+            self._meta_event.clear()
+            self._send("/live/track/get/name", track_id)
+            self._wait_meta(timeout_s)
+            with self._lock:
+                return self._names.get(track_id, "")
 
     def fetch_selected_track(self, timeout_s: float) -> int:
-        with self._lock:
-            self._selected_track = None
-        self._meta_event.clear()
-        self._send("/live/view/get/selected_track")
-        self._wait_meta(timeout_s)
-        with self._lock:
-            return self._selected_track if self._selected_track is not None else 0
+        with self._query_lock:
+            with self._lock:
+                self._selected_track = None
+            self._meta_event.clear()
+            self._send("/live/view/get/selected_track")
+            self._wait_meta(timeout_s)
+            with self._lock:
+                if self._selected_track is None:
+                    return -1
+                return int(self._selected_track)
 
     def start(self) -> None:
         dispatcher = Dispatcher()
@@ -317,6 +397,7 @@ class OscListener:
         dispatcher.map("/live/track/get/name", self._on_name)
         dispatcher.map("/live/view/get/selected_track", self._on_selected_track)
         dispatcher.map("/live/clip/get/is_recording", self._on_clip_is_recording)
+        dispatcher.map("/live/clip_slot/get/has_clip", self._on_has_clip)
         dispatcher.map("/live/track/get/playing_slot_index", self._on_playing_slot)
         dispatcher.map("/live/track/get/fired_slot_index", self._on_fired_slot)
         self._server = ReuseAddrOSCUDPServer((self._listen_host, self._listen_port), dispatcher)

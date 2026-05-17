@@ -22,6 +22,16 @@ def test_fallback_selected_track():
     assert resolve_track_label(query) == "Keys"
 
 
+def test_fallback_recording_track():
+    query = FakeOscQuery(
+        num_tracks=3,
+        names={1: "Bass"},
+        selected=0,
+        recording_track=1,
+    )
+    assert resolve_track_label(query) == "Bass"
+
+
 def test_unknown_when_no_armed_and_no_name():
     query = FakeOscQuery(num_tracks=2, selected=0)
     assert resolve_track_label(query) == "UnknownTrack"

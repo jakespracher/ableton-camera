@@ -13,6 +13,15 @@ class FakeObsClient:
     def set_staged_file(self, path: Path) -> None:
         self._staged_file = path
 
+    def is_recording(self) -> bool:
+        return self.recording
+
+    def stop_orphan_recording(self) -> bool:
+        if not self.recording:
+            return False
+        self.stop_record()
+        return True
+
     def start_record(self) -> None:
         self.calls.append("start")
         self.recording = True

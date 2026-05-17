@@ -9,11 +9,13 @@ class FakeOscQuery:
         armed: dict[int, bool] | None = None,
         names: dict[int, str] | None = None,
         selected: int = 0,
+        recording_track: int | None = None,
     ) -> None:
         self._num_tracks = num_tracks
         self._armed = armed or {}
         self._names = names or {}
         self._selected = selected
+        self._recording_track = recording_track
 
     def get_num_tracks(self) -> int:
         return self._num_tracks
@@ -26,3 +28,6 @@ class FakeOscQuery:
 
     def get_selected_track_index(self) -> int:
         return self._selected
+
+    def get_recording_track_index(self) -> int | None:
+        return self._recording_track

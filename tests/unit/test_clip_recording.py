@@ -14,6 +14,9 @@ class StubProbe:
     def get_fired_slot_index(self, track_id: int) -> int:
         return -1
 
+    def clip_slot_has_clip(self, track_id: int, clip_id: int) -> bool:
+        return (track_id, clip_id) in self._recording
+
     def clip_is_recording(self, track_id: int, clip_id: int) -> bool:
         return (track_id, clip_id) in self._recording
 

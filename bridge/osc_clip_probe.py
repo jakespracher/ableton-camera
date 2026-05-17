@@ -17,11 +17,14 @@ class LiveOscClipProbe(ClipRecordingProbe):
     def get_fired_slot_index(self, track_id: int) -> int:
         return self._listener.fetch_fired_slot_index(track_id, 0.3)
 
+    def clip_slot_has_clip(self, track_id: int, clip_id: int) -> bool:
+        return self._listener.fetch_clip_slot_has_clip(track_id, clip_id, 0.3)
+
     def clip_is_recording(self, track_id: int, clip_id: int) -> bool:
         return self._listener.fetch_clip_is_recording(track_id, clip_id, 0.3)
 
     def any_recording(self) -> bool:
-        return any_clip_recording(self)
+        return any_clip_recording(self, last_slots=self._listener._last_recording_slots)
 
 
 def attach_clip_poll(listener: OscListener, interval_s: float = 0.15) -> None:
