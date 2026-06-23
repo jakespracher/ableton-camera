@@ -43,9 +43,9 @@
       <button type="submit">Place camera video</button>
     </form>
     <script>
-      const params = new URLSearchParams(location.search);
+      const defaultPath = __ABLETON_CAMERA_DEFAULT_PATH_JSON__;
       const input = document.getElementById("sidecarPath");
-      input.value = params.get("defaultPath") || "";
+      input.value = defaultPath;
       document.getElementById("form").addEventListener("submit", (event) => {
         event.preventDefault();
         closeWithResult({ sidecarPath: input.value.trim() });

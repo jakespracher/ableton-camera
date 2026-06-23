@@ -121,6 +121,32 @@ def test_stop_without_staged_file_does_not_update_sidecar(output_dir: Path, stag
     assert json.loads(existing.read_text(encoding="utf-8")) == {"track_label": "Previous"}
 
 
+def test_sidecar_write_failure_removes_stale_last_take(output_dir: Path, staging_dir: Path, monkeypatch):
+    def fail_write_last_take(*_args, **_kwargs):
+        raise OSError("sidecar disk failure")
+
+    existing = output_dir / "last_take.json"
+    existing.write_text('{"track_label": "Previous"}', encoding="utf-8")
+    staged = staging_dir / "take.mkv"
+    staged.write_bytes(b"fake")
+    obs = FakeObsClient(staging_dir)
+    obs.set_staged_file(staged)
+    recorder = Recorder(
+        obs,
+        FakeOscQuery(num_tracks=1, armed={0: True}, names={0: "Vocals"}),
+        output_dir,
+        staging_dir,
+    )
+    wire_recorder_probes(recorder)
+    monkeypatch.setattr("bridge.recorder.write_last_take", fail_write_last_take)
+
+    recorder.on_edge(RecordingEdge.STARTED, RecordingSignals(1, 0, False))
+    recorder.on_edge(RecordingEdge.STOPPED, RecordingSignals(0, 0, False))
+
+    assert list(output_dir.glob("Vocals_*.mkv"))
+    assert not existing.exists()
+
+
 def test_second_take_distinct_filenames(output_dir: Path, staging_dir: Path):
     obs = FakeObsClient(staging_dir)
     metadata = FakeOscQuery(num_tracks=1, armed={0: True}, names={0: "Vocals"})

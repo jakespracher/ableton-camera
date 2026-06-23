@@ -11,7 +11,7 @@ from bridge.metadata import OscQuery, resolve_track_label
 from bridge.naming import build_filename, extension_from_path
 from bridge.obs_client import ObsClient
 from bridge.recording_state import RecordingEdge, RecordingSignals, format_signals
-from bridge.take_sidecar import TakeSidecar, write_last_take
+from bridge.take_sidecar import LAST_TAKE_FILENAME, TakeSidecar, write_last_take
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +78,12 @@ class Recorder:
             format_signals(signals),
         )
         if self._pending_obs_start:
+            if not signals.start_active:
+                logger.info("Count-in finished after record was canceled; clearing pending OBS start")
+                self._pending_obs_start = False
+                self._track_label = None
+                self._started_at = None
+                return
             self._start_obs(reason="count_in_finished")
 
     def _on_live_start(self, signals: RecordingSignals) -> None:
@@ -176,6 +182,7 @@ class Recorder:
             if not dest.is_file():
                 logger.error("Recording move did not create destination file: %s", dest)
                 return
+            (self._output_dir / LAST_TAKE_FILENAME).unlink(missing_ok=True)
             sidecar = write_last_take(
                 self._output_dir,
                 TakeSidecar(

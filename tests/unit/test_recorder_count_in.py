@@ -32,6 +32,23 @@ def test_starts_obs_after_count_in_finishes(output_dir, staging_dir):
     assert obs.calls == ["start"]
 
 
+def test_cancelled_count_in_does_not_start_obs(output_dir, staging_dir):
+    obs = FakeObsClient(staging_dir)
+    recorder = Recorder(
+        obs,
+        FakeOscQuery(num_tracks=1, armed={0: True}, names={0: "Vocals"}),
+        output_dir,
+        staging_dir,
+    )
+    recorder.set_counting_in_probe(lambda: True, osc_available=lambda: True)
+    recorder.on_edge(RecordingEdge.STARTED, RecordingSignals(0, 1, False))
+
+    recorder.on_count_in_finished(RecordingSignals(0, 0, False))
+
+    assert obs.calls == []
+    assert recorder._pending_obs_start is False
+
+
 def test_starts_obs_after_count_in_session_before_clip_recording(output_dir, staging_dir):
     """Session record is on after count-in but clip.is_recording may lag by a bar or two."""
     obs = FakeObsClient(staging_dir)

@@ -81,13 +81,18 @@ async function resolveSidecarPath(context: ReturnType<typeof initialize>): Promi
   }
 
   const defaultPath = envPath ?? "";
-  const dialogUrl = `data:text/html,${encodeURIComponent(sidecarDialog)}?defaultPath=${encodeURIComponent(defaultPath)}`;
+  const dialogUrl = `data:text/html,${encodeURIComponent(renderSidecarDialog(defaultPath))}`;
   const result = await context.ui.showModalDialog(dialogUrl, 520, 160);
   const parsed = JSON.parse(result) as { sidecarPath?: string };
   if (!parsed.sidecarPath) {
     throw new Error(`Set ${SIDECAR_ENV} or enter a last_take.json path.`);
   }
   return parsed.sidecarPath;
+}
+
+function renderSidecarDialog(defaultPath: string): string {
+  const defaultPathJson = JSON.stringify(defaultPath).replace(/</g, "\\u003c");
+  return sidecarDialog.replace("__ABLETON_CAMERA_DEFAULT_PATH_JSON__", defaultPathJson);
 }
 
 function readSidecar(sidecarPath: string): TakeSidecar {

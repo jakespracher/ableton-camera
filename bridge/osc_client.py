@@ -229,10 +229,6 @@ class OscListener:
         self.handle_session_status(address, *args)
         if self._session_status != prev:
             logger.info("Live session_record_status %s→%s", prev, self._session_status)
-        # Session record engaged: start OBS even before clip is_recording is visible.
-        if self._session_status != 0 and prev == 0:
-            logger.info("Path=session_status_engaged (direct START edge)")
-            self._on_edge(RecordingEdge.STARTED, self.signals)
         self._dispatch_edges(source="session_status")
         # Session disengaged with no arrangement/clip tail: state machine may never have armed.
         if self._session_status == 0 and prev != 0:

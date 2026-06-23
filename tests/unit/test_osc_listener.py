@@ -41,7 +41,7 @@ def test_session_record_engaged_fires_start():
     )
     listener._clip_recording = False
     listener.inject("/live/song/get/session_record_status", 1)
-    assert RecordingEdge.STARTED in edges
+    assert edges == [RecordingEdge.STARTED]
 
 
 def test_session_disengage_stops_obs_when_idle():
