@@ -17,3 +17,7 @@ naming:
   # Subfolder under the output directory: output_dir/{project}/track_timestamp.ext
   # Defaults to today's date (YYYY-MM-DD) when empty. Override: --project "My Album"
   project: ""
+
+sync:
+  # Reminder value from docs/SYNC.md; the bridge writes it to last_take.json for Extensions.
+  obs_source_sync_offset_ms: 0

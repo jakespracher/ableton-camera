@@ -15,3 +15,38 @@ def test_obs_host_defaults_when_null_or_empty():
         }
         config = AppConfig.from_dict(data)
         assert config.obs.host == "127.0.0.1"
+
+
+def test_sync_offset_defaults_to_zero():
+    data = {
+        "osc": {
+            "send_host": "127.0.0.1",
+            "send_port": 11000,
+            "listen_host": "127.0.0.1",
+            "listen_port": 11001,
+        },
+        "obs": {"host": "127.0.0.1", "port": 4455},
+        "paths": {"staging_dir": "/tmp/staging"},
+    }
+
+    config = AppConfig.from_dict(data)
+
+    assert config.sync_offset_ms == 0
+
+
+def test_sync_offset_reads_documented_config_value():
+    data = {
+        "osc": {
+            "send_host": "127.0.0.1",
+            "send_port": 11000,
+            "listen_host": "127.0.0.1",
+            "listen_port": 11001,
+        },
+        "obs": {"host": "127.0.0.1", "port": 4455},
+        "paths": {"staging_dir": "/tmp/staging"},
+        "sync": {"obs_source_sync_offset_ms": 120},
+    }
+
+    config = AppConfig.from_dict(data)
+
+    assert config.sync_offset_ms == 120

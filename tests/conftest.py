@@ -32,3 +32,13 @@ def staging_dir(tmp_path: Path) -> Path:
     staging = tmp_path / "staging"
     staging.mkdir()
     return staging
+
+
+def wire_recorder_probes(recorder, listener=None) -> None:
+    """Match production wiring for count-in and record_mode timing logs."""
+    if listener is not None:
+        recorder.set_counting_in_probe(
+            listener.fetch_counting_in,
+            osc_available=listener.count_in_osc_available,
+            record_mode_latency_ms=listener.ms_since_record_mode_on,
+        )

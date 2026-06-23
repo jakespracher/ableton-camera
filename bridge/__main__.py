@@ -13,7 +13,7 @@ from bridge.osc_client import OscListener
 from bridge.osc_query import LiveOscQuery
 from bridge.prompts import OutputDirCancelled, choose_output_dir
 from bridge.recorder import Recorder
-from bridge.recording_state import RecordingEdge, RecordingSignals
+from bridge.recording_state import RecordingEdge, RecordingSignals, format_signals
 
 logger = logging.getLogger(__name__)
 
@@ -95,20 +95,6 @@ def main(argv: list[str] | None = None) -> int:
         config.staging_dir,
     )
     def on_edge(edge: RecordingEdge, signals: RecordingSignals) -> None:
-        if edge is RecordingEdge.STARTED:
-            logger.info(
-                "Live recording started (arrangement=%s session_status=%s clip=%s)",
-                signals.arrangement,
-                signals.session_status,
-                signals.clip_recording,
-            )
-        elif edge is RecordingEdge.STOPPED:
-            logger.info(
-                "Live recording stopped (arrangement=%s session_status=%s clip=%s)",
-                signals.arrangement,
-                signals.session_status,
-                signals.clip_recording,
-            )
         recorder.on_edge(edge, signals)
 
     def on_count_in_finished(signals: RecordingSignals) -> None:
@@ -129,8 +115,13 @@ def main(argv: list[str] | None = None) -> int:
         session_output_dir,
         config.staging_dir,
         track_merge=config.track_merge,
+        sync_offset_ms=config.sync_offset_ms,
     )
-    recorder.set_counting_in_probe(listener.fetch_counting_in)
+    recorder.set_counting_in_probe(
+        listener.fetch_counting_in,
+        osc_available=listener.count_in_osc_available,
+        record_mode_latency_ms=listener.ms_since_record_mode_on,
+    )
     listener.set_obs_recording_probe(lambda: recorder.is_recording)
 
     def shutdown(_signum=None, _frame=None) -> None:
@@ -160,7 +151,23 @@ def main(argv: list[str] | None = None) -> int:
                 config.osc.listen_port,
             )
         raise
-    logger.info("Listening for Ableton recording (arrangement + session)...")
+
+    listener.fetch_counting_in(0.5)
+    logger.info(
+        "Count-in OSC probe: available=%s is_counting_in=%s "
+        "(if available=False, run scripts/patch_abletonosc_count_in.py and restart Live)",
+        listener.count_in_osc_available(),
+        listener.is_counting_in(),
+    )
+    logger.info(
+        "Start policy: arrangement → OBS on record_mode 0→1 (arm record, then play when ready). "
+        "Session → defer count-in if OSC works."
+    )
+    logger.info(
+        "Initial Live state: %s",
+        format_signals(listener.signals),
+    )
+    logger.info("Listening on %s:%s (use -v for debug)", config.osc.listen_host, config.osc.listen_port)
     signal.pause()
     return 0
 

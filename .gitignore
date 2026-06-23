@@ -8,3 +8,5 @@ __pycache__/
 config.local.yaml
 .env
 .cache/
+extensions/*/node_modules/
+extensions/*/dist/

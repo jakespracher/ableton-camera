@@ -46,3 +46,9 @@ def test_fetch_selected_track():
     listener = _listener()
     _send_with_reply(listener)
     assert listener.fetch_selected_track(0.5) == 2
+
+
+def test_on_arm_ignores_none_arm_value():
+    listener = _listener()
+    listener.inject("/live/track/get/arm", 2, None)
+    assert listener.fetch_arm(2, 0.5) is False

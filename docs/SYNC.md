@@ -120,17 +120,19 @@ You do not need to enter this manually unless clip polling fails; then set a fal
 
 ---
 
-## Count-in (3 beats ≈ 2 s at 90 BPM)
+## Count-in
 
-If Ableton’s **metronome count-in** is on, the bridge **waits until count-in finishes** before starting OBS (when `is_counting_in` is available via AbletonOSC).
+**Arrangement record:** OBS starts when you engage arrangement record (`record_mode`), not when `is_counting_in` goes false. Over OSC, `is_counting_in` often clears **~2 beats after** the audible downbeat, which looked like a bridge bug but was flag lag.
 
-At **89.5 BPM**, **3 beats** ≈ `3 × (60 / 89.5)` ≈ **2.01 seconds** — exactly the kind of offset you saw if OBS used to start on the record button.
+You may have a few metronome clicks at the head of the video; trim in post or turn count-in off in Live.
 
-After updating:
+**Session record:** If `is_counting_in` is available from AbletonOSC, the bridge still defers OBS until count-in finishes (when session record is used without arrangement).
+
+Setup for session count-in defer:
 
 1. Run `python scripts/patch_abletonosc_count_in.py` if needed (or use the patched install).
 2. **Quit and reopen Live** so AbletonOSC reloads.
-3. Re-run the clap test; remaining offset should be small (Camo/OBS latency only).
+3. Confirm the bridge log does not show `Unknown OSC address: .../is_counting_in`.
 
 To disable count-in in Live: metronome / record menu → **Count-In** → **None**.
 

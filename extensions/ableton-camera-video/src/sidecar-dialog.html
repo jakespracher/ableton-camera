@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 16px;
+      }
+      label,
+      input,
+      button {
+        display: block;
+        width: 100%;
+      }
+      input {
+        box-sizing: border-box;
+        margin: 8px 0 12px;
+      }
+    </style>
+    <script>
+      const isWebKitMessageHandlerAvailable =
+        window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.live;
+      const isWebView2 = window.chrome && window.chrome.webview;
+
+      function doSendMessage(message) {
+        if (isWebKitMessageHandlerAvailable) {
+          window.webkit.messageHandlers.live.postMessage(message);
+        } else if (isWebView2) {
+          window.chrome.webview.postMessage(message);
+        }
+      }
+
+      function closeWithResult(result) {
+        doSendMessage({ method: "close_and_send", params: [JSON.stringify(result)] });
+      }
+    </script>
+  </head>
+  <body>
+    <form id="form">
+      <label for="sidecarPath">Path to last_take.json</label>
+      <input id="sidecarPath" name="sidecarPath" type="text" required />
+      <button type="submit">Place camera video</button>
+    </form>
+    <script>
+      const params = new URLSearchParams(location.search);
+      const input = document.getElementById("sidecarPath");
+      input.value = params.get("defaultPath") || "";
+      document.getElementById("form").addEventListener("submit", (event) => {
+        event.preventDefault();
+        closeWithResult({ sidecarPath: input.value.trim() });
+      });
+    </script>
+  </body>
+</html>

@@ -31,6 +31,11 @@ def test_start_on_arrangement():
     assert sm.apply(RecordingSignals(1, 0, False)) == [RecordingEdge.STARTED]
 
 
-def test_start_on_clip_recording():
+def test_start_active_includes_session_not_clip_alone():
+    assert RecordingSignals(0, 1, True).start_active is True
+    assert RecordingSignals(0, 0, True).start_active is False
+
+
+def test_clip_alone_does_not_emit_start():
     sm = RecordingStateMachine()
-    assert sm.apply(RecordingSignals(0, 0, True)) == [RecordingEdge.STARTED]
+    assert sm.apply(RecordingSignals(0, 0, True)) == []

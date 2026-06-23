@@ -2,6 +2,7 @@ import pytest
 
 from bridge.osc_client import OscListener
 from bridge.recorder import Recorder
+from tests.conftest import wire_recorder_probes
 from tests.fakes.fake_obs import FakeObsClient
 from tests.fakes.fake_osc_query import FakeOscQuery
 
@@ -19,6 +20,7 @@ def test_osc_inject_drives_recorder(output_dir, staging_dir):
         11001,
         recorder.on_edge,
     )
+    wire_recorder_probes(recorder, listener)
     staged = staging_dir / "clip.mkv"
     staged.write_bytes(b"v")
     obs.set_staged_file(staged)
