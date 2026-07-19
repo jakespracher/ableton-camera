@@ -8,6 +8,8 @@ from typing import Protocol
 logger = logging.getLogger(__name__)
 
 PARTIAL_SUFFIXES = (".part", ".tmp", ".partial")
+STOP_RECORD_ATTEMPTS = 5
+STOP_RECORD_RETRY_DELAY_S = 0.4
 
 
 class ObsClient(Protocol):
@@ -39,6 +41,7 @@ def wait_for_stable_file(
     timeout_s: float = 10.0,
     poll_interval_s: float = 0.2,
     stable_checks: int = 3,
+    min_size_bytes: int = 1,
 ) -> Path | None:
     deadline = time.monotonic() + timeout_s
     last_path: Path | None = None
@@ -51,6 +54,12 @@ def wait_for_stable_file(
             time.sleep(poll_interval_s)
             continue
         size = path.stat().st_size
+        if size < min_size_bytes:
+            last_path = path
+            last_size = size
+            stable_count = 0
+            time.sleep(poll_interval_s)
+            continue
         if path == last_path and size == last_size:
             stable_count += 1
             if stable_count >= stable_checks:
@@ -60,7 +69,7 @@ def wait_for_stable_file(
             last_path = path
             last_size = size
         time.sleep(poll_interval_s)
-    return last_path
+    return None
 
 
 def _record_output_active(response: object) -> bool:
@@ -116,15 +125,50 @@ class ObsClientReal:
     def stop_record(self) -> Path | None:
         client = self._connect()
         output_path: Path | None = None
+        last_error: Exception | None = None
+        still_recording_after_error: bool | None = None
         try:
-            response = client.stop_record()
-            out = getattr(response, "output_path", None) or (
-                response.datain.get("outputPath") if hasattr(response, "datain") else None
-            )
-            if out:
-                output_path = Path(str(out))
+            for attempt in range(1, STOP_RECORD_ATTEMPTS + 1):
+                try:
+                    response = client.stop_record()
+                    out = getattr(response, "output_path", None) or (
+                        response.datain.get("outputPath") if hasattr(response, "datain") else None
+                    )
+                    if out:
+                        output_path = Path(str(out))
+                    last_error = None
+                    break
+                except Exception as exc:
+                    last_error = exc
+                    try:
+                        still_recording = self.is_recording()
+                    except Exception as status_exc:
+                        logger.warning("Could not verify OBS recording state after StopRecord failure: %s", status_exc)
+                        return None
+                    still_recording_after_error = still_recording
+                    if not still_recording:
+                        logger.warning(
+                            "OBS StopRecord failed, but OBS is no longer recording; resolving finalized file: %s",
+                            exc,
+                        )
+                        last_error = None
+                        break
+                    if attempt >= STOP_RECORD_ATTEMPTS:
+                        break
+                    logger.warning(
+                        "OBS StopRecord failed (attempt %s/%s): %s",
+                        attempt,
+                        STOP_RECORD_ATTEMPTS,
+                        exc,
+                    )
+                    time.sleep(STOP_RECORD_RETRY_DELAY_S)
+
+            if last_error is not None and (still_recording_after_error if still_recording_after_error is not None else self.is_recording()):
+                logger.warning("OBS is still recording after StopRecord failed: %s", last_error)
+                return None
         except Exception as exc:
-            logger.warning("stop_record response missing path: %s", exc)
+            logger.warning("Could not verify OBS recording state after StopRecord failure: %s", exc)
+            return None
 
         if output_path and output_path.is_file():
             return output_path

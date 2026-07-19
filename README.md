@@ -8,6 +8,7 @@ Sync video recording (iPhone via Continuity Camera → OBS on Mac) with Ableton 
 - [Build plan](docs/PLAN.md) — phased implementation
 - [TDD plan](docs/TDD_PLAN.md) — test harness, fakes, and test order per phase
 - [Sync / alignment](docs/SYNC.md) — clap test and OBS sync offset
+- [Video placement](docs/VIDEO_PLACEMENT.md) — Ableton Extension workflow for placing video under arrangement takes
 
 ## Status
 

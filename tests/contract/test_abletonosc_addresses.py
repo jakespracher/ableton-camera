@@ -6,6 +6,8 @@ BRIDGE_OSC_PATHS = frozenset(
         "/live/song/start_listen/session_record_status",
         "/live/song/get/record_mode",
         "/live/song/get/session_record_status",
+        "/live/song/get/is_playing",
+        "/live/song/start_listen/is_playing",
         "/live/song/get/is_counting_in",
         "/live/song/start_listen/is_counting_in",
         "/live/song/get/num_tracks",

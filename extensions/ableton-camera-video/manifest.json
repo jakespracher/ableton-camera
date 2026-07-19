@@ -1,0 +1,7 @@
+{
+  "name": "Ableton Camera Video",
+  "author": "ableton-camera",
+  "entry": "dist/extension.js",
+  "version": "0.1.0",
+  "minimumApiVersion": "1.0.0"
+}

@@ -8,6 +8,12 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from bridge.config import AppConfig, load_config
+from bridge.take_sidecar import SIDECAR_POINTER_ENV
+
+
+@pytest.fixture(autouse=True)
+def isolate_sidecar_pointer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(SIDECAR_POINTER_ENV, str(tmp_path / "sidecar_path.json"))
 
 
 @pytest.fixture
@@ -32,3 +38,13 @@ def staging_dir(tmp_path: Path) -> Path:
     staging = tmp_path / "staging"
     staging.mkdir()
     return staging
+
+
+def wire_recorder_probes(recorder, listener=None) -> None:
+    """Match production wiring for count-in and record_mode timing logs."""
+    if listener is not None:
+        recorder.set_counting_in_probe(
+            listener.fetch_counting_in,
+            osc_available=listener.count_in_osc_available,
+            record_mode_latency_ms=listener.ms_since_record_mode_on,
+        )

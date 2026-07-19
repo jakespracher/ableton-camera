@@ -68,3 +68,45 @@ def test_obs_client_real_start_stop(tmp_path):
     assert path == staging / "out.mkv"
     mock_ws.start_record.assert_called_once()
     mock_ws.stop_record.assert_called_once()
+
+
+def test_stop_record_does_not_return_fallback_file_when_obs_still_active(tmp_path, monkeypatch):
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    active_file = staging / "active.mov"
+    active_file.write_bytes(b"still recording")
+    monkeypatch.setattr("bridge.obs_client.STOP_RECORD_ATTEMPTS", 2)
+    monkeypatch.setattr("bridge.obs_client.STOP_RECORD_RETRY_DELAY_S", 0)
+    mock_ws = MagicMock()
+    mock_ws.stop_record.side_effect = RuntimeError("StopRecord failed")
+    status = MagicMock()
+    status.output_active = True
+    mock_ws.get_record_status.return_value = status
+
+    with patch("obsws_python.ReqClient", return_value=mock_ws):
+        client = ObsClientReal("127.0.0.1", 4455, "", staging)
+        assert client.stop_record() is None
+
+    assert mock_ws.stop_record.call_count == 2
+    assert mock_ws.get_record_status.call_count == 2
+
+
+def test_stop_record_resolves_file_when_failed_stop_already_stopped_obs(tmp_path, monkeypatch):
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    finalized_file = staging / "finalized.mov"
+    finalized_file.write_bytes(b"finalized")
+    monkeypatch.setattr("bridge.obs_client.STOP_RECORD_ATTEMPTS", 3)
+    monkeypatch.setattr("bridge.obs_client.STOP_RECORD_RETRY_DELAY_S", 0)
+    mock_ws = MagicMock()
+    mock_ws.stop_record.side_effect = RuntimeError("StopRecord returned code 501")
+    status = MagicMock()
+    status.output_active = False
+    mock_ws.get_record_status.return_value = status
+
+    with patch("obsws_python.ReqClient", return_value=mock_ws):
+        client = ObsClientReal("127.0.0.1", 4455, "", staging)
+        assert client.stop_record() == finalized_file
+
+    mock_ws.stop_record.assert_called_once()
+    mock_ws.get_record_status.assert_called_once()

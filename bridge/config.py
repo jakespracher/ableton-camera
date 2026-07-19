@@ -29,6 +29,7 @@ class AppConfig:
     staging_dir: Path
     track_merge: str
     project_name: str
+    sync_offset_ms: int
     output_dir: Path | None = None
 
     @classmethod
@@ -37,6 +38,7 @@ class AppConfig:
         obs = data["obs"]
         paths = data["paths"]
         naming = data.get("naming", {})
+        sync = data.get("sync", {})
         return cls(
             osc=OscConfig(
                 send_host=str(osc["send_host"]),
@@ -52,6 +54,7 @@ class AppConfig:
             staging_dir=Path(paths["staging_dir"]).expanduser(),
             track_merge=str(naming.get("track_merge", "_")),
             project_name=str(naming.get("project", "") or "").strip(),
+            sync_offset_ms=int(sync.get("obs_source_sync_offset_ms", 0)),
             output_dir=None,
         )
 

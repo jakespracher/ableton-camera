@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 from bridge.recording_state import RecordingEdge, RecordingSignals
 from bridge.recorder import Recorder
+from tests.conftest import wire_recorder_probes
 from tests.fakes.fake_obs import FakeObsClient
 from tests.fakes.fake_osc_query import FakeOscQuery
 
@@ -21,7 +22,9 @@ def test_finalize_moves_not_copies(output_dir, staging_dir):
         staging_dir,
         clock=clock,
     )
+    wire_recorder_probes(recorder)
     recorder.on_edge(RecordingEdge.STARTED, RecordingSignals(1, 0, False))
     recorder.on_edge(RecordingEdge.STOPPED, RecordingSignals(0, 0, False))
     assert not staged.exists()
-    assert len(list(output_dir.iterdir())) == 1
+    assert len(list(output_dir.glob("*.mkv"))) == 1
+    assert (output_dir / "last_take.json").is_file()

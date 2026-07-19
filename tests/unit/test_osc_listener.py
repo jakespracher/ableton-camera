@@ -11,6 +11,7 @@ def test_subscribe_sends_listen_addresses():
     addresses = [a for a, _ in listener.sent_messages]
     assert "/live/song/start_listen/record_mode" in addresses
     assert "/live/song/start_listen/session_record_status" in addresses
+    assert "/live/song/start_listen/is_playing" in addresses
 
 
 def test_inject_record_mode_start_stop():
@@ -40,7 +41,7 @@ def test_session_record_engaged_fires_start():
     )
     listener._clip_recording = False
     listener.inject("/live/song/get/session_record_status", 1)
-    assert RecordingEdge.STARTED in edges
+    assert edges == [RecordingEdge.STARTED]
 
 
 def test_session_disengage_stops_obs_when_idle():

@@ -22,3 +22,9 @@ def test_wait_for_stable_file(staging_dir):
     path = staging_dir / "take.mkv"
     path.write_bytes(b"1234")
     assert wait_for_stable_file(staging_dir, timeout_s=2.0, poll_interval_s=0.05) == path
+
+
+def test_wait_for_stable_file_ignores_zero_byte_candidate(staging_dir):
+    path = staging_dir / "take.mkv"
+    path.write_bytes(b"")
+    assert wait_for_stable_file(staging_dir, timeout_s=0.1, poll_interval_s=0.01) is None
