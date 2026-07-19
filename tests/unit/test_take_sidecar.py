@@ -53,6 +53,24 @@ def test_write_last_take_replaces_existing_sidecar(output_dir):
     assert "old" not in payload
 
 
+def test_write_last_take_preserves_extra_metadata(output_dir):
+    video_path = output_dir / "Capture_2026-07-19_150000.mov"
+    video_path.write_bytes(b"video")
+    take = TakeSidecar(
+        video_path=video_path,
+        track_label="Grand Piano",
+        recorded_start=datetime(2026, 7, 19, 15, 0, 0, tzinfo=timezone.utc),
+        finalized_at=datetime(2026, 7, 19, 15, 0, 5, tzinfo=timezone.utc),
+        extra={"take_type": "capture_midi", "bars": 4},
+    )
+
+    sidecar_path = write_last_take(output_dir, take)
+
+    payload = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    assert payload["take_type"] == "capture_midi"
+    assert payload["bars"] == 4
+
+
 def test_write_take_sidecars_appends_history(output_dir):
     first_video = output_dir / "Vocals_2026-06-23_110000.mkv"
     second_video = output_dir / "Guitar_2026-06-23_110100.mkv"
