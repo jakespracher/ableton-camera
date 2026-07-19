@@ -4,9 +4,12 @@ import argparse
 import logging
 import signal
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
+from bridge.capture import CaptureRequest, CaptureService, DESTINATION_CODES
 from bridge.config import AppConfig, load_config
+from bridge.control import send_capture_request, start_control_server
 from bridge.naming import default_project_name, resolve_output_dir
 from bridge.obs_client import ObsClientReal
 from bridge.osc_client import OscListener
@@ -38,6 +41,65 @@ def _default_config_path() -> Path:
 
 
 def main(argv: list[str] | None = None) -> int:
+    args = list(sys.argv[1:] if argv is None else argv)
+    if args and args[0] == "capture":
+        return _capture_main(args[1:])
+    return _bridge_main(args)
+
+
+def _capture_main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(description="Capture recent MIDI and OBS Replay Buffer video")
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=_default_config_path(),
+        help="Path to YAML config",
+    )
+    parser.add_argument("--control-host", type=str, default=None)
+    parser.add_argument("--control-port", type=int, default=None)
+    parser.add_argument("--bars", type=int, default=4)
+    parser.add_argument(
+        "--destination",
+        choices=sorted(DESTINATION_CODES),
+        default="arrangement",
+    )
+    parser.add_argument("-v", "--verbose", action="store_true")
+    args = parser.parse_args(argv)
+
+    configure_logging(verbose=args.verbose)
+
+    try:
+        config = load_config(args.config)
+    except (FileNotFoundError, ValueError) as exc:
+        logger.error("%s", exc)
+        return 1
+
+    host = args.control_host or config.control.host
+    port = args.control_port or config.control.port
+    try:
+        response = send_capture_request(
+            host,
+            port,
+            CaptureRequest(bars=args.bars, destination=args.destination),
+            timeout_s=5,
+        )
+    except OSError as exc:
+        print(f"Could not reach ableton-camera bridge at {host}:{port}: {exc}", file=sys.stderr)
+        return 1
+
+    if response.ok:
+        print(response.message)
+        if response.video_path is not None:
+            print(f"Video: {response.video_path}")
+        if response.sidecar_path is not None:
+            print(f"Sidecar: {response.sidecar_path}")
+        return 0
+
+    print(response.message, file=sys.stderr)
+    return 1
+
+
+def _bridge_main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="Sync OBS recording with Ableton Live")
     parser.add_argument(
         "--config",
@@ -92,6 +154,7 @@ def main(argv: list[str] | None = None) -> int:
     logger.info("Project: %s (under %s)", project_name, config.output_dir)
     logger.info("Config: %s", args.config.resolve())
     logger.info("OBS WebSocket: %s:%s", config.obs.host, config.obs.port)
+    logger.info("Capture control: %s:%s", config.control.host, config.control.port)
 
     obs = ObsClientReal(
         config.obs.host,
@@ -123,15 +186,27 @@ def main(argv: list[str] | None = None) -> int:
         track_merge=config.track_merge,
         sync_offset_ms=config.sync_offset_ms,
     )
+    capture_service = CaptureService(
+        obs=obs,
+        query=metadata,
+        output_dir=session_output_dir,
+        clock=lambda: datetime.now(timezone.utc),
+        sync_offset_ms=config.sync_offset_ms,
+        track_merge=config.track_merge,
+    )
     recorder.set_counting_in_probe(
         listener.fetch_counting_in,
         osc_available=listener.count_in_osc_available,
         record_mode_latency_ms=listener.ms_since_record_mode_on,
     )
     listener.set_obs_recording_probe(lambda: recorder.is_recording)
+    control_server = None
 
     def shutdown(_signum=None, _frame=None) -> None:
         logger.info("Shutting down...")
+        if control_server is not None:
+            control_server.shutdown()
+            control_server.server_close()
         listener.stop()  # also stops clip poll thread
         sys.exit(0)
 
@@ -141,6 +216,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if obs.stop_orphan_recording():
             logger.info("Cleared orphaned OBS recording from a previous session")
+        if obs.ensure_replay_buffer():
+            logger.info("OBS Replay Buffer active")
+        else:
+            logger.info("OBS Replay Buffer started; capture MIDI needs replay history before first use")
     except Exception:
         logger.exception(
             "Could not check OBS record status; ensure OBS is running and WebSocket is enabled"
@@ -155,6 +234,21 @@ def main(argv: list[str] | None = None) -> int:
                 "Port %s is in use (another ableton-camera still running?). "
                 "Kill it with: pkill -f ableton-camera",
                 config.osc.listen_port,
+        )
+        raise
+
+    try:
+        control_server = start_control_server(
+            config.control.host,
+            config.control.port,
+            capture_service.capture_midi,
+        )
+    except OSError as exc:
+        if getattr(exc, "errno", None) == 48:  # Address already in use
+            logger.error(
+                "Capture control port %s is in use (another ableton-camera still running?). "
+                "Kill it with: pkill -f ableton-camera",
+                config.control.port,
             )
         raise
 
@@ -174,6 +268,11 @@ def main(argv: list[str] | None = None) -> int:
         format_signals(listener.signals),
     )
     logger.info("Listening on %s:%s (use -v for debug)", config.osc.listen_host, config.osc.listen_port)
+    logger.info(
+        "Capture MIDI control listening on %s:%s",
+        config.control.host,
+        config.control.port,
+    )
     signal.pause()
     return 0
 

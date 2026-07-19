@@ -23,9 +23,16 @@ class ObsConfig:
 
 
 @dataclass
+class ControlConfig:
+    host: str
+    port: int
+
+
+@dataclass
 class AppConfig:
     osc: OscConfig
     obs: ObsConfig
+    control: ControlConfig
     staging_dir: Path
     track_merge: str
     project_name: str
@@ -36,6 +43,7 @@ class AppConfig:
     def from_dict(cls, data: dict[str, Any]) -> AppConfig:
         osc = data["osc"]
         obs = data["obs"]
+        control = data.get("control", {})
         paths = data["paths"]
         naming = data.get("naming", {})
         sync = data.get("sync", {})
@@ -51,6 +59,10 @@ class AppConfig:
                 port=int(obs.get("port", 4455)),
                 password=str(obs.get("password") or ""),
             ),
+            control=ControlConfig(
+                host=_default_host(control),
+                port=int(control.get("port", 11002)),
+            ),
             staging_dir=Path(paths["staging_dir"]).expanduser(),
             track_merge=str(naming.get("track_merge", "_")),
             project_name=str(naming.get("project", "") or "").strip(),
@@ -59,11 +71,15 @@ class AppConfig:
         )
 
 
-def _obs_host(obs: dict[str, Any]) -> str:
-    raw = obs.get("host")
+def _default_host(data: dict[str, Any]) -> str:
+    raw = data.get("host")
     if raw is None or str(raw).strip() in ("", "None", "null"):
         return "127.0.0.1"
     return str(raw).strip()
+
+
+def _obs_host(obs: dict[str, Any]) -> str:
+    return _default_host(obs)
 
 
 def load_config(path: Path) -> AppConfig:
