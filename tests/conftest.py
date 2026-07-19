@@ -8,6 +8,12 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from bridge.config import AppConfig, load_config
+from bridge.take_sidecar import SIDECAR_POINTER_ENV
+
+
+@pytest.fixture(autouse=True)
+def isolate_sidecar_pointer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(SIDECAR_POINTER_ENV, str(tmp_path / "sidecar_path.json"))
 
 
 @pytest.fixture

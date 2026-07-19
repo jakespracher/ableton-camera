@@ -14,6 +14,7 @@ def test_stop_without_staged_file_logs_and_does_not_crash(output_dir, staging_di
     obs = MagicMock()
     obs.start_record = MagicMock()
     obs.stop_record = MagicMock(return_value=None)
+    obs.is_recording = MagicMock(return_value=False)
     metadata = FakeOscQuery(num_tracks=1, armed={0: True}, names={0: "Vocals"})
     recorder = Recorder(obs, metadata, output_dir, staging_dir)
     wire_recorder_probes(recorder)
@@ -33,3 +34,37 @@ def test_start_obs_failure_resets_state(output_dir, staging_dir):
 
     recorder.on_edge(RecordingEdge.STARTED, RecordingSignals(1, 0, False))
     assert recorder.is_recording is False
+
+
+def test_failed_stop_keeps_recorder_active_when_obs_is_still_recording(output_dir, staging_dir):
+    obs = MagicMock()
+    obs.start_record = MagicMock()
+    obs.stop_record = MagicMock(return_value=None)
+    obs.is_recording = MagicMock(return_value=True)
+    metadata = FakeOscQuery(num_tracks=1, armed={0: True}, names={0: "Vocals"})
+    recorder = Recorder(obs, metadata, output_dir, staging_dir)
+    wire_recorder_probes(recorder)
+
+    recorder.on_edge(RecordingEdge.STARTED, RecordingSignals(1, 0, False))
+    recorder.on_edge(RecordingEdge.STOPPED, RecordingSignals(0, 0, False))
+
+    assert recorder.is_recording is True
+
+
+def test_stop_with_finalized_path_does_not_requery_flapping_obs_status(output_dir, staging_dir):
+    staged = staging_dir / "take.mov"
+    staged.write_bytes(b"video")
+    obs = MagicMock()
+    obs.start_record = MagicMock()
+    obs.stop_record = MagicMock(return_value=staged)
+    obs.is_recording = MagicMock(return_value=True)
+    metadata = FakeOscQuery(num_tracks=1, armed={0: True}, names={0: "Vocals"})
+    recorder = Recorder(obs, metadata, output_dir, staging_dir)
+    wire_recorder_probes(recorder)
+
+    recorder.on_edge(RecordingEdge.STARTED, RecordingSignals(1, 0, False))
+    recorder.on_edge(RecordingEdge.STOPPED, RecordingSignals(0, 0, False))
+
+    assert list(output_dir.glob("Vocals_*.mov"))
+    assert recorder.is_recording is False
+    obs.is_recording.assert_not_called()

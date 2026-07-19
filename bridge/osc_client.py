@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import queue
 import threading
 import time
 from collections.abc import Callable
@@ -57,6 +58,7 @@ class OscListener:
         on_edge: RecordingHandler,
         on_count_in_finished: Callable[[RecordingSignals], None] | None = None,
         is_obs_recording: Callable[[], bool] | None = None,
+        defer_callbacks: bool = False,
     ) -> None:
         self._send_host = send_host
         self._send_port = send_port
@@ -65,6 +67,11 @@ class OscListener:
         self._on_edge = on_edge
         self._on_count_in_finished = on_count_in_finished
         self._is_obs_recording = is_obs_recording
+        self._defer_callbacks = defer_callbacks
+        self._callback_queue: queue.Queue[Callable[[], None] | None] | None = (
+            queue.Queue() if defer_callbacks else None
+        )
+        self._callback_thread: Thread | None = None
         self._client = SimpleUDPClient(send_host, send_port)
         self._state = RecordingStateMachine()
         self._arrangement = 0
@@ -93,6 +100,8 @@ class OscListener:
         self._meta_event = threading.Event()
         self._query_lock = threading.RLock()
         self._last_recording_slots: dict[int, int] = {}
+        if self._defer_callbacks:
+            self._start_callback_worker()
 
     @property
     def sent_messages(self) -> list[tuple[str, list]]:
@@ -137,6 +146,42 @@ class OscListener:
             log.append((address, payload))
         self._client.send_message(address, payload)
 
+    def _start_callback_worker(self) -> None:
+        if self._callback_queue is None or self._callback_thread is not None:
+            return
+        self._callback_thread = Thread(
+            target=self._callback_loop,
+            daemon=True,
+            name="osc-callback-worker",
+        )
+        self._callback_thread.start()
+
+    def _callback_loop(self) -> None:
+        if self._callback_queue is None:
+            return
+        while True:
+            callback = self._callback_queue.get()
+            if callback is None:
+                return
+            try:
+                callback()
+            except Exception:
+                logger.exception("Deferred OSC callback failed")
+
+    def _dispatch_callback(self, callback: Callable[[], None]) -> None:
+        if self._callback_queue is None:
+            callback()
+            return
+        self._callback_queue.put(callback)
+
+    def _emit_edge(self, edge: RecordingEdge, signals: RecordingSignals) -> None:
+        self._dispatch_callback(lambda: self._on_edge(edge, signals))
+
+    def _emit_count_in_finished(self, signals: RecordingSignals) -> None:
+        if self._on_count_in_finished is None:
+            return
+        self._dispatch_callback(lambda: self._on_count_in_finished(signals))
+
     def handle_record_mode(self, _address: str, *args: object) -> None:
         value = _osc_int(args[-1]) if args else None
         if value is not None:
@@ -161,7 +206,7 @@ class OscListener:
                 format_signals(self.signals),
             )
         for edge in edges:
-            self._on_edge(edge, self.signals)
+            self._emit_edge(edge, self.signals)
 
     def _stop_obs_if_idle(self) -> None:
         """Stop OBS when Live is no longer writing audio but we missed the STOP edge."""
@@ -171,7 +216,7 @@ class OscListener:
             return
         logger.info("Force stop: Live idle but OBS still recording %s", format_signals(self.signals))
         self._state.was_stop_active = False
-        self._on_edge(RecordingEdge.STOPPED, self.signals)
+        self._emit_edge(RecordingEdge.STOPPED, self.signals)
 
     def _start_obs_if_session_recording(self) -> None:
         """Session record was already on; clip just began — start OBS without waiting for is_recording lag."""
@@ -184,7 +229,7 @@ class OscListener:
             "Path=session_clip_began_while_session_on %s",
             format_signals(self.signals),
         )
-        self._on_edge(RecordingEdge.STARTED, self.signals)
+        self._emit_edge(RecordingEdge.STARTED, self.signals)
 
     def fetch_record_mode(self, timeout_s: float) -> int:
         with self._query_lock:
@@ -251,8 +296,8 @@ class OscListener:
                 int(self._counting_in),
                 format_signals(self.signals),
             )
-        if was_counting and not self._counting_in and self._on_count_in_finished:
-            self._on_count_in_finished(self.signals)
+        if was_counting and not self._counting_in:
+            self._emit_count_in_finished(self.signals)
 
     def count_in_osc_available(self) -> bool:
         return self._count_in_osc_seen
@@ -540,7 +585,7 @@ class OscListener:
         self.subscribe()
         self.start_clip_poll()
         for edge in self.apply_boot_sync():
-            self._on_edge(edge, self.signals)
+            self._emit_edge(edge, self.signals)
 
     def stop(self) -> None:
         self.stop_clip_poll()
@@ -548,6 +593,10 @@ class OscListener:
             self._server.shutdown()
         if self._thread:
             self._thread.join(timeout=2)
+        if self._callback_queue is not None and self._callback_thread is not None:
+            self._callback_queue.put(None)
+            self._callback_thread.join(timeout=2)
+            self._callback_thread = None
 
     def inject(self, address: str, *args: object) -> None:
         """Test seam: simulate AbletonOSC reply."""

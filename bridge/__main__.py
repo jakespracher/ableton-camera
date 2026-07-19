@@ -18,6 +18,14 @@ from bridge.recording_state import RecordingEdge, RecordingSignals, format_signa
 logger = logging.getLogger(__name__)
 
 
+def configure_logging(*, verbose: bool) -> None:
+    logging.basicConfig(
+        level=logging.DEBUG if verbose else logging.INFO,
+        format="%(levelname)s %(name)s: %(message)s",
+    )
+    logging.getLogger("obsws_python.baseclient").setLevel(logging.WARNING)
+
+
 def _default_config_path() -> Path:
     for candidate in (
         Path("config.local.yaml"),
@@ -53,10 +61,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
 
-    logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
-        format="%(levelname)s %(name)s: %(message)s",
-    )
+    configure_logging(verbose=args.verbose)
 
     try:
         config = load_config(args.config)
@@ -107,6 +112,7 @@ def main(argv: list[str] | None = None) -> int:
         config.osc.listen_port,
         on_edge,
         on_count_in_finished=on_count_in_finished,
+        defer_callbacks=True,
     )
     metadata = LiveOscQuery(listener)
     recorder = Recorder(
