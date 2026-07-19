@@ -42,9 +42,11 @@ OBS Studio is installed at `/Applications/OBS.app` (via Homebrew: `brew install 
 1. **Open OBS once** (creates settings; complete any first-run prompts).
 2. **Tools → WebSocket Server Settings** → enable server, set a password.
 3. Copy password into `config.local.yaml` under `obs.password`.
-4. **Settings → Output → Recording** → set path to staging, e.g. `~/Movies/OBS-Staging` (must match `paths.staging_dir` in config).
+4. **Settings → Output → Recording** → set path to staging, e.g. `~/Movies/OBS-Staging`.
 5. **Settings → Output → Replay Buffer** → enable Replay Buffer and set maximum replay time longer than your biggest Capture MIDI window.
 6. Add **Continuity Camera** (or iPhone) as a video source in your scene.
+
+If OBS **Output Mode** is set to **Advanced**, use the Recording tab’s **Recording Path**. OBS can keep a separate Simple-mode file path, and the bridge will follow the active OBS path if it differs from `paths.staging_dir`.
 
 For trimmed Capture MIDI videos, install `ffmpeg`:
 

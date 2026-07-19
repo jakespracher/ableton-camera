@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -115,6 +116,37 @@ def test_save_replay_buffer_resolves_newest_stable_file(tmp_path):
         client = ObsClientReal("127.0.0.1", 4455, "", staging)
         assert client.save_replay_buffer() == replay
 
+    mock_ws.save_replay_buffer.assert_called_once()
+
+
+def test_save_replay_buffer_uses_obs_advanced_recording_path(tmp_path, monkeypatch):
+    staging = tmp_path / "staging"
+    actual = tmp_path / "actual"
+    staging.mkdir()
+    actual.mkdir()
+    mock_ws = MagicMock()
+
+    def profile_parameter(category: str, parameter: str):
+        values = {
+            ("Output", "Mode"): "Advanced",
+            ("AdvOut", "RecFilePath"): str(actual),
+        }
+        return SimpleNamespace(parameter_value=values[(category, parameter)])
+
+    watched: list[Path] = []
+
+    def fake_wait(directory: Path, **_kwargs):
+        watched.append(directory)
+        return directory / "replay.mov"
+
+    mock_ws.get_profile_parameter.side_effect = profile_parameter
+    monkeypatch.setattr("bridge.obs_client.wait_for_new_stable_file", fake_wait)
+
+    with patch("obsws_python.ReqClient", return_value=mock_ws):
+        client = ObsClientReal("127.0.0.1", 4455, "", staging)
+        assert client.save_replay_buffer() == actual / "replay.mov"
+
+    assert watched == [actual]
     mock_ws.save_replay_buffer.assert_called_once()
 
 

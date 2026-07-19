@@ -135,6 +135,18 @@ def _record_output_active(response: object) -> bool:
     return False
 
 
+def _profile_parameter_value(response: object) -> str | None:
+    value = getattr(response, "parameter_value", None)
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    datain = getattr(response, "datain", None)
+    if isinstance(datain, dict):
+        value = datain.get("parameterValue")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
 class ObsClientReal:
     def __init__(self, host: str, port: int, password: str, staging_dir: Path) -> None:
         self._host = host
@@ -185,10 +197,36 @@ class ObsClientReal:
         self.start_replay_buffer()
         return False
 
+    def _recording_directory(self) -> Path:
+        try:
+            client = self._connect()
+            mode = _profile_parameter_value(client.get_profile_parameter("Output", "Mode"))
+            if mode and mode.lower() == "advanced":
+                response = client.get_profile_parameter("AdvOut", "RecFilePath")
+            else:
+                response = client.get_profile_parameter("SimpleOutput", "FilePath")
+            raw_path = _profile_parameter_value(response)
+        except Exception as exc:
+            logger.debug("Could not read OBS recording path; using configured staging dir: %s", exc)
+            return self._staging_dir
+
+        if not raw_path:
+            return self._staging_dir
+
+        directory = Path(raw_path).expanduser()
+        if directory != self._staging_dir:
+            logger.warning(
+                "OBS recording path is %s, but config staging_dir is %s; watching OBS path",
+                directory,
+                self._staging_dir,
+            )
+        return directory
+
     def save_replay_buffer(self) -> Path | None:
-        before = newest_file_in_dir(self._staging_dir)
+        directory = self._recording_directory()
+        before = newest_file_in_dir(directory)
         self._connect().save_replay_buffer()
-        return wait_for_new_stable_file(self._staging_dir, after=before)
+        return wait_for_new_stable_file(directory, after=before)
 
     def stop_orphan_recording(self) -> bool:
         """Stop OBS if it was left recording (e.g. after a bridge crash)."""
@@ -249,5 +287,5 @@ class ObsClientReal:
         if output_path and output_path.is_file():
             return output_path
 
-        resolved = wait_for_stable_file(self._staging_dir)
+        resolved = wait_for_stable_file(self._recording_directory())
         return resolved
