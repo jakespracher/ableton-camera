@@ -52,6 +52,33 @@ def test_fetch_selected_track():
     assert listener.fetch_selected_track(0.5) == 2
 
 
+def test_fetch_capture_metadata():
+    listener = _listener()
+
+    def send(address: str, *args: int | float | str) -> None:
+        if address == "/live/song/get/tempo":
+            listener.inject("/live/song/get/tempo", 123.0)
+        elif address == "/live/song/get/signature_numerator":
+            listener.inject("/live/song/get/signature_numerator", 3)
+        elif address == "/live/song/get/current_song_time":
+            listener.inject("/live/song/get/current_song_time", 48.5)
+
+    listener._send = send
+    assert listener.fetch_tempo(0.5) == 123.0
+    assert listener.fetch_signature_numerator(0.5) == 3
+    assert listener.fetch_current_song_time(0.5) == 48.5
+
+
+def test_capture_midi_sends_destination():
+    listener = _listener()
+    sent: list[tuple[str, tuple[int | float | str, ...]]] = []
+    listener._send = lambda address, *args: sent.append((address, args))
+
+    listener.capture_midi(2)
+
+    assert sent == [("/live/song/capture_midi", (2,))]
+
+
 def test_on_arm_ignores_none_arm_value():
     listener = _listener()
     listener.inject("/live/track/get/arm", 2, None)

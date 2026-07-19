@@ -1,8 +1,8 @@
-# Capture MIDI + replay buffer (design notes)
+# Capture MIDI + replay buffer
 
-Status: **investigation / future feature** — not implemented.
+Status: **implemented** as a bridge-owned capture flow.
 
-This doc captures feasibility research and a proposed direction for **retroactive video** tied to Ableton’s Capture MIDI workflow, without requiring sample-accurate alignment to the captured MIDI clip length.
+This doc captures the **retroactive video** workflow tied to Ableton’s Capture MIDI feature. The running bridge owns Live OSC state, OBS WebSocket state, the selected output folder, and the project folder; `ableton-camera capture` is a small local control client that asks that bridge to capture now.
 
 ---
 
@@ -18,13 +18,13 @@ When you’ve been improvising on armed MIDI tracks and want to **keep the last 
 
 ---
 
-## Proposed UX: CLI-driven capture (not the Live transport button)
+## UX: CLI-driven capture (not the Live transport button)
 
 Instead of detecting when the user presses **Capture MIDI** inside Live’s transport bar, the bridge **invokes** capture:
 
 | Approach | Notes |
 |----------|--------|
-| **`ableton-camera capture`** (subcommand) | Sends `/live/song/capture_midi` via AbletonOSC, then saves replay. Works from terminal, Shortcuts, Stream Deck, etc. |
+| **`ableton-camera capture`** (subcommand) | Sends a local control request to the running bridge. The bridge invokes `/live/song/capture_midi`, saves OBS Replay Buffer, and writes sidecars. Works from terminal, Shortcuts, Stream Deck, etc. |
 | **Bluetooth / HID button** | Pair a BLE button (e.g. Flic, Nuimo, generic media remote mapped to a keyboard shortcut) to run the CLI or a small helper script. Lets you trigger capture away from the desk without wiring Live’s UI. |
 | **Live transport Capture button** | Possible via M4L or patching `can_capture_midi` listen, but **not required** if the CLI is the primary trigger. |
 
@@ -39,6 +39,7 @@ Instead of detecting when the user presses **Capture MIDI** inside Live’s tran
 ```
 [BLE button] → (macOS) keyboard shortcut / Shortcuts / shell script
             → ableton-camera capture --bars 4
+            → bridge control server
             → OSC capture_midi + OBS SaveReplayBuffer
 ```
 
@@ -66,7 +67,7 @@ Normal bridge mode uses **Start/Stop Record**. Capture mode uses **Replay Buffer
 **Trimming to N bars:**
 
 - Compute wall-clock duration from Live tempo:  
-  `seconds = bars × (60 / tempo_bpm) × (4 / beats_per_bar)`  
+  `seconds = bars × beats_per_bar × 60 / tempo_bpm`  
   For 4/4: `seconds = bars × 240 / tempo_bpm`.
 - **Preferred:** OBS build + obs-websocket support for saving only the last *N* seconds of the buffer (engine support for partial replay save has landed in recent OBS; confirm on your OBS version whether WebSocket exposes it).
 - **Fallback:** save full replay file, then **ffmpeg trim** to the last `seconds` (or accept full buffer if trim is skipped for v1).
@@ -101,26 +102,29 @@ Optional later: listen `can_capture_midi` to grey out CLI or warn “nothing to 
 
 ---
 
-## End-to-end flow (target)
+## End-to-end flow
 
 ```mermaid
 sequenceDiagram
   participant User
   participant CLI as ableton-camera capture
+  participant Bridge as running bridge
   participant Live as Ableton Live
   participant OBS as OBS Replay Buffer
 
-  Note over OBS: Replay buffer running since bridge start
+  Note over Bridge,OBS: Replay buffer running since bridge start
   User->>CLI: trigger (CLI / BLE / shortcut)
-  CLI->>Live: /live/song/capture_midi
+  CLI->>Bridge: CaptureRequest (bars, destination)
+  Bridge->>Live: get tempo, signature, song time, track label
+  Bridge->>Live: /live/song/capture_midi
   Live-->>Live: new MIDI clip from buffer
-  CLI->>Live: get tempo (and optionally track name)
-  CLI->>OBS: SaveReplayBuffer (last N bars)
-  OBS-->>CLI: replay file path
-  CLI->>CLI: move/rename into project folder
+  Bridge->>OBS: SaveReplayBuffer
+  OBS-->>Bridge: replay file path
+  Bridge->>Bridge: trim last N bars when ffmpeg is available
+  Bridge-->>CLI: CaptureResponse (video + sidecar paths)
 ```
 
-**Ordering:** either **capture MIDI first then save replay** (clip exists for naming/metadata) or **save replay first then capture MIDI** — decide in implementation; replay content is “last N bars before save,” not “since clip was created.”
+**Ordering:** the bridge reads tempo/signature/song time, resolves the track label, invokes **Capture MIDI**, then saves OBS Replay Buffer. Replay content is “last N bars before save,” not “since clip was created.”
 
 ---
 
@@ -136,33 +140,32 @@ Track label: same resolution as `bridge/metadata.py` (armed → recording clip �
 
 ---
 
-## CLI sketch (not implemented)
+## CLI
 
 ```bash
 # One-shot capture: MIDI into Live + save last 4 bars of replay video
 ableton-camera capture --bars 4
 
-# Override project subfolder for this run (same as main command)
-ableton-camera capture --bars 8 --project "My Album" --output-dir ~/Movies/sessions
-
-# Optional: arrangement vs session destination for capture_midi
+# Arrangement vs session destination for capture_midi
 ableton-camera capture --bars 4 --destination session   # 1=session, 2=arrangement, 0=auto
+
+# Wait longer for large sets / slow replay saves
+ableton-camera capture --bars 4 --timeout 180
 ```
 
-Config (`config.yaml` / `config.local.yaml`) could hold defaults:
+`capture` requires the bridge to already be running. It uses the output folder/project selected by that bridge process and talks to the bridge over:
 
 ```yaml
-capture:
-  bars: 4
-  destination: auto   # auto | session | arrangement
-  replay_buffer: true # start replay buffer when bridge runs
+control:
+  host: 127.0.0.1
+  port: 11002
 ```
 
 ---
 
 ## Comparison to current “record sync” mode
 
-| | Record sync (current) | Capture + replay (proposed) |
+| | Record sync (current) | Capture + replay |
 |--|------------------------|-----------------------------|
 | **Trigger** | Live arrangement / session record | User CLI / BLE / shortcut |
 | **OBS** | Start/Stop Record | Rolling replay buffer |
@@ -201,34 +204,37 @@ If we ever want the **transport Capture MIDI button** to trigger video without t
 
 ---
 
-## Implementation phases (suggested)
+## Implementation phases
 
 ### Phase 1 — Prove OBS replay path
 
-- [ ] Start replay buffer from bridge on launch (config flag).
-- [ ] `ableton-camera capture --bars N` only saves replay (no OSC yet), trim or accept buffer length.
-- [ ] Confirm file lands in project subfolder with sensible name.
+- [x] Start replay buffer from bridge on launch.
+- [x] `ableton-camera capture --bars N` asks the running bridge to save replay.
+- [x] Confirm file lands in project subfolder with sensible name.
 
 ### Phase 2 — Wire Capture MIDI
 
-- [ ] Call `/live/song/capture_midi` before or after save (document chosen order).
-- [ ] Query tempo for bar → second conversion.
+- [x] Call `/live/song/capture_midi` before saving replay.
+- [x] Query tempo and time signature for bar → second conversion.
 - [ ] Optional: patch AbletonOSC for `can_capture_midi` preflight.
 
 ### Phase 3 — Polish
 
-- [ ] `--destination`, config defaults, debounce for BLE double-tap.
-- [ ] ffmpeg trim fallback; log when requested bars exceed buffer capacity.
-- [ ] Docs in SETUP.md (OBS replay buffer settings, BLE examples).
+- [x] `--destination`.
+- [x] ffmpeg trim fallback.
+- [x] Docs in SETUP.md (OBS replay buffer settings, capture command).
+- [ ] Config defaults for capture bars/destination.
+- [ ] Debounce for BLE double-tap.
+- [ ] Log when requested bars exceed OBS replay buffer capacity.
 
 ---
 
-## Open questions
+## Resolved decisions
 
-- [ ] Subcommand name: `capture` vs `capture-midi` vs flag on main command?
-- [ ] Should `capture` require the main bridge process (OSC listener already running) or be a one-shot client that connects, acts, exits?
-- [ ] Exact filename pattern and whether to include `bars` in the name (e.g. `_4bar`).
-- [ ] Run replay buffer whenever `ableton-camera` runs, or only when `capture.replay_buffer: true`?
+- Subcommand name: `capture`.
+- `capture` requires the running bridge process.
+- Filename pattern: `{track}_capture_{timestamp}.{ext}`.
+- Replay Buffer starts whenever the bridge runs.
 
 ---
 

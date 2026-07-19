@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -68,6 +69,85 @@ def test_obs_client_real_start_stop(tmp_path):
     assert path == staging / "out.mkv"
     mock_ws.start_record.assert_called_once()
     mock_ws.stop_record.assert_called_once()
+
+
+def test_replay_buffer_status_reads_output_active(tmp_path):
+    mock_ws = MagicMock()
+    status = MagicMock()
+    status.output_active = True
+    mock_ws.get_replay_buffer_status.return_value = status
+
+    with patch("obsws_python.ReqClient", return_value=mock_ws):
+        client = ObsClientReal("127.0.0.1", 4455, "", tmp_path)
+        assert client.is_replay_buffer_active() is True
+
+    status.output_active = None
+    status.datain = {"outputActive": False}
+    assert client.is_replay_buffer_active() is False
+
+
+def test_ensure_replay_buffer_starts_when_inactive(tmp_path):
+    mock_ws = MagicMock()
+    inactive = MagicMock()
+    inactive.output_active = False
+    mock_ws.get_replay_buffer_status.return_value = inactive
+
+    with patch("obsws_python.ReqClient", return_value=mock_ws):
+        client = ObsClientReal("127.0.0.1", 4455, "", tmp_path)
+        assert client.ensure_replay_buffer() is False
+
+    mock_ws.start_replay_buffer.assert_called_once()
+
+
+def test_save_replay_buffer_resolves_newest_stable_file(tmp_path):
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    existing = staging / "existing.mov"
+    existing.write_bytes(b"old")
+    replay = staging / "replay.mov"
+    mock_ws = MagicMock()
+
+    def save_replay():
+        replay.write_bytes(b"video")
+
+    mock_ws.save_replay_buffer.side_effect = save_replay
+
+    with patch("obsws_python.ReqClient", return_value=mock_ws):
+        client = ObsClientReal("127.0.0.1", 4455, "", staging)
+        assert client.save_replay_buffer() == replay
+
+    mock_ws.save_replay_buffer.assert_called_once()
+
+
+def test_save_replay_buffer_uses_obs_advanced_recording_path(tmp_path, monkeypatch):
+    staging = tmp_path / "staging"
+    actual = tmp_path / "actual"
+    staging.mkdir()
+    actual.mkdir()
+    mock_ws = MagicMock()
+
+    def profile_parameter(category: str, parameter: str):
+        values = {
+            ("Output", "Mode"): "Advanced",
+            ("AdvOut", "RecFilePath"): str(actual),
+        }
+        return SimpleNamespace(parameter_value=values[(category, parameter)])
+
+    watched: list[Path] = []
+
+    def fake_wait(directory: Path, **_kwargs):
+        watched.append(directory)
+        return directory / "replay.mov"
+
+    mock_ws.get_profile_parameter.side_effect = profile_parameter
+    monkeypatch.setattr("bridge.obs_client.wait_for_new_stable_file", fake_wait)
+
+    with patch("obsws_python.ReqClient", return_value=mock_ws):
+        client = ObsClientReal("127.0.0.1", 4455, "", staging)
+        assert client.save_replay_buffer() == actual / "replay.mov"
+
+    assert watched == [actual]
+    mock_ws.save_replay_buffer.assert_called_once()
 
 
 def test_stop_record_does_not_return_fallback_file_when_obs_still_active(tmp_path, monkeypatch):

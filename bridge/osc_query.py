@@ -28,3 +28,15 @@ class LiveOscQuery(OscQuery):
 
     def get_recording_track_index(self) -> int | None:
         return self._listener.fetch_recording_track_index(self._timeout_s)
+
+    def get_tempo(self) -> float:
+        return self._listener.fetch_tempo(self._timeout_s)
+
+    def get_signature_numerator(self) -> int:
+        return self._listener.fetch_signature_numerator(self._timeout_s)
+
+    def get_current_song_time(self) -> float:
+        return self._listener.fetch_current_song_time(self._timeout_s)
+
+    def capture_midi(self, destination: int) -> None:
+        self._listener.capture_midi(destination)

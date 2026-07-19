@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -21,9 +21,10 @@ class TakeSidecar:
     recorded_start: datetime
     finalized_at: datetime
     sync_offset_ms: int = 0
+    extra: dict[str, object] = field(default_factory=dict)
 
     def to_json_dict(self) -> dict[str, object]:
-        return {
+        payload = {
             "schema_version": SCHEMA_VERSION,
             "video_path": str(self.video_path.resolve()),
             "track_label": self.track_label,
@@ -31,6 +32,8 @@ class TakeSidecar:
             "finalized_at": self.finalized_at.isoformat(),
             "sync_offset_ms": self.sync_offset_ms,
         }
+        payload.update(self.extra)
+        return payload
 
 
 def write_last_take(output_dir: Path, take: TakeSidecar) -> Path:

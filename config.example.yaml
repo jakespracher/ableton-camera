@@ -9,6 +9,10 @@ obs:
   port: 4455
   password: ""
 
+control:
+  host: 127.0.0.1
+  port: 11002
+
 paths:
   staging_dir: ~/Movies/OBS-Staging
 

@@ -40,6 +40,15 @@ def _osc_bool(value: object) -> bool | None:
     return bool(parsed)
 
 
+def _osc_float(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 class ReuseAddrOSCUDPServer(BlockingOSCUDPServer):
     """Allow quick restart when a previous bridge process was just killed."""
 
@@ -97,6 +106,9 @@ class OscListener:
         self._arms: dict[int, bool] = {}
         self._names: dict[int, str] = {}
         self._selected_track: int | None = None
+        self._tempo: float | None = None
+        self._signature_numerator: int | None = None
+        self._current_song_time: float | None = None
         self._meta_event = threading.Event()
         self._query_lock = threading.RLock()
         self._last_recording_slots: dict[int, int] = {}
@@ -516,6 +528,30 @@ class OscListener:
             self._selected_track = value
         self._meta_event.set()
 
+    def _on_tempo(self, _address: str, *args: object) -> None:
+        value = _osc_float(args[-1]) if args else None
+        if value is None:
+            return
+        with self._lock:
+            self._tempo = value
+        self._meta_event.set()
+
+    def _on_signature_numerator(self, _address: str, *args: object) -> None:
+        value = _osc_int(args[-1]) if args else None
+        if value is None:
+            return
+        with self._lock:
+            self._signature_numerator = value
+        self._meta_event.set()
+
+    def _on_current_song_time(self, _address: str, *args: object) -> None:
+        value = _osc_float(args[-1]) if args else None
+        if value is None:
+            return
+        with self._lock:
+            self._current_song_time = value
+        self._meta_event.set()
+
     def _wait_meta(self, timeout_s: float) -> None:
         deadline = time.monotonic() + timeout_s
         while time.monotonic() < deadline:
@@ -565,6 +601,43 @@ class OscListener:
                     return -1
                 return int(self._selected_track)
 
+    def fetch_tempo(self, timeout_s: float) -> float:
+        with self._query_lock:
+            with self._lock:
+                self._tempo = None
+            self._meta_event.clear()
+            self._send("/live/song/get/tempo")
+            self._wait_meta(timeout_s)
+            with self._lock:
+                return self._tempo if self._tempo is not None else 120.0
+
+    def fetch_signature_numerator(self, timeout_s: float) -> int:
+        with self._query_lock:
+            with self._lock:
+                self._signature_numerator = None
+            self._meta_event.clear()
+            self._send("/live/song/get/signature_numerator")
+            self._wait_meta(timeout_s)
+            with self._lock:
+                return (
+                    self._signature_numerator
+                    if self._signature_numerator is not None
+                    else 4
+                )
+
+    def fetch_current_song_time(self, timeout_s: float) -> float:
+        with self._query_lock:
+            with self._lock:
+                self._current_song_time = None
+            self._meta_event.clear()
+            self._send("/live/song/get/current_song_time")
+            self._wait_meta(timeout_s)
+            with self._lock:
+                return self._current_song_time if self._current_song_time is not None else 0.0
+
+    def capture_midi(self, destination: int) -> None:
+        self._send("/live/song/capture_midi", destination)
+
     def start(self) -> None:
         dispatcher = Dispatcher()
         dispatcher.map("/live/song/get/record_mode", self._on_record_mode)
@@ -572,6 +645,9 @@ class OscListener:
         dispatcher.map("/live/song/get/is_playing", self._on_is_playing)
         dispatcher.map("/live/song/get/is_counting_in", self._on_counting_in)
         dispatcher.map("/live/song/get/num_tracks", self._on_num_tracks)
+        dispatcher.map("/live/song/get/tempo", self._on_tempo)
+        dispatcher.map("/live/song/get/signature_numerator", self._on_signature_numerator)
+        dispatcher.map("/live/song/get/current_song_time", self._on_current_song_time)
         dispatcher.map("/live/track/get/arm", self._on_arm)
         dispatcher.map("/live/track/get/name", self._on_name)
         dispatcher.map("/live/view/get/selected_track", self._on_selected_track)
@@ -606,6 +682,12 @@ class OscListener:
             self._on_session_status(address, *args)
         elif address == "/live/song/get/num_tracks":
             self._on_num_tracks(address, *args)
+        elif address == "/live/song/get/tempo":
+            self._on_tempo(address, *args)
+        elif address == "/live/song/get/signature_numerator":
+            self._on_signature_numerator(address, *args)
+        elif address == "/live/song/get/current_song_time":
+            self._on_current_song_time(address, *args)
         elif address == "/live/track/get/arm":
             self._on_arm(address, *args)
         elif address == "/live/track/get/name":
