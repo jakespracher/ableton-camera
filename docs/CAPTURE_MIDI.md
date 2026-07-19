@@ -148,6 +148,9 @@ ableton-camera capture --bars 4
 
 # Arrangement vs session destination for capture_midi
 ableton-camera capture --bars 4 --destination session   # 1=session, 2=arrangement, 0=auto
+
+# Wait longer for large sets / slow replay saves
+ableton-camera capture --bars 4 --timeout 180
 ```
 
 `capture` requires the bridge to already be running. It uses the output folder/project selected by that bridge process and talks to the bridge over:

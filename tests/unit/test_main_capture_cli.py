@@ -28,7 +28,7 @@ control:
 def test_capture_cli_sends_control_request(monkeypatch, tmp_path, capsys):
     config_path = tmp_path / "config.yaml"
     _write_config(config_path)
-    sent: list[tuple[str, int, CaptureRequest]] = []
+    sent: list[tuple[str, int, CaptureRequest, float]] = []
 
     def fake_send_capture_request(
         host: str,
@@ -37,7 +37,7 @@ def test_capture_cli_sends_control_request(monkeypatch, tmp_path, capsys):
         *,
         timeout_s: float,
     ) -> CaptureResponse:
-        sent.append((host, port, request))
+        sent.append((host, port, request, timeout_s))
         return CaptureResponse(
             ok=True,
             message="Captured",
@@ -65,8 +65,36 @@ def test_capture_cli_sends_control_request(monkeypatch, tmp_path, capsys):
     )
 
     assert result == 0
-    assert sent == [("127.0.0.1", 11012, CaptureRequest(bars=2, destination="session"))]
+    assert sent == [("127.0.0.1", 11012, CaptureRequest(bars=2, destination="session"), 120)]
     assert "/tmp/video.mov" in capsys.readouterr().out
+
+
+def test_capture_cli_allows_timeout_override(monkeypatch, tmp_path):
+    config_path = tmp_path / "config.yaml"
+    _write_config(config_path)
+    sent: list[float] = []
+
+    def fake_send_capture_request(
+        host: str,
+        port: int,
+        request: CaptureRequest,
+        *,
+        timeout_s: float,
+    ) -> CaptureResponse:
+        sent.append(timeout_s)
+        return CaptureResponse(ok=True, message="Captured")
+
+    monkeypatch.setattr(
+        main_module,
+        "send_capture_request",
+        fake_send_capture_request,
+        raising=False,
+    )
+
+    result = main_module.main(["capture", "--config", str(config_path), "--timeout", "30"])
+
+    assert result == 0
+    assert sent == [30]
 
 
 def test_capture_cli_returns_nonzero_on_capture_error(monkeypatch, tmp_path, capsys):
@@ -97,3 +125,29 @@ def test_capture_cli_returns_nonzero_on_capture_error(monkeypatch, tmp_path, cap
 
     assert result == 1
     assert "Replay Buffer was started" in capsys.readouterr().err
+
+
+def test_capture_cli_reports_bridge_response_timeout(monkeypatch, tmp_path, capsys):
+    config_path = tmp_path / "config.yaml"
+    _write_config(config_path)
+
+    def fake_send_capture_request(
+        host: str,
+        port: int,
+        request: CaptureRequest,
+        *,
+        timeout_s: float,
+    ) -> CaptureResponse:
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(
+        main_module,
+        "send_capture_request",
+        fake_send_capture_request,
+        raising=False,
+    )
+
+    result = main_module.main(["capture", "--config", str(config_path)])
+
+    assert result == 1
+    assert "Timed out waiting for ableton-camera bridge" in capsys.readouterr().err

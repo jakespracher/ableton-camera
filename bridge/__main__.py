@@ -19,6 +19,7 @@ from bridge.recorder import Recorder
 from bridge.recording_state import RecordingEdge, RecordingSignals, format_signals
 
 logger = logging.getLogger(__name__)
+DEFAULT_CAPTURE_TIMEOUT_S = 120.0
 
 
 def configure_logging(*, verbose: bool) -> None:
@@ -59,6 +60,12 @@ def _capture_main(argv: list[str]) -> int:
     parser.add_argument("--control-port", type=int, default=None)
     parser.add_argument("--bars", type=int, default=4)
     parser.add_argument(
+        "--timeout",
+        type=float,
+        default=DEFAULT_CAPTURE_TIMEOUT_S,
+        help="Seconds to wait for the running bridge to complete capture",
+    )
+    parser.add_argument(
         "--destination",
         choices=sorted(DESTINATION_CODES),
         default="arrangement",
@@ -81,8 +88,14 @@ def _capture_main(argv: list[str]) -> int:
             host,
             port,
             CaptureRequest(bars=args.bars, destination=args.destination),
-            timeout_s=5,
+            timeout_s=args.timeout,
         )
+    except TimeoutError as exc:
+        print(
+            f"Timed out waiting for ableton-camera bridge at {host}:{port}: {exc}",
+            file=sys.stderr,
+        )
+        return 1
     except OSError as exc:
         print(f"Could not reach ableton-camera bridge at {host}:{port}: {exc}", file=sys.stderr)
         return 1
