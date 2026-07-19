@@ -21,6 +21,14 @@ class ObsClient(Protocol):
 
     def stop_orphan_recording(self) -> bool: ...
 
+    def is_replay_buffer_active(self) -> bool: ...
+
+    def start_replay_buffer(self) -> None: ...
+
+    def ensure_replay_buffer(self) -> bool: ...
+
+    def save_replay_buffer(self) -> Path | None: ...
+
 
 def newest_file_in_dir(directory: Path, *, ignore_suffixes: tuple[str, ...] = PARTIAL_SUFFIXES) -> Path | None:
     if not directory.is_dir():
@@ -51,6 +59,51 @@ def wait_for_stable_file(
     while time.monotonic() < deadline:
         path = newest_file_in_dir(directory)
         if path is None:
+            time.sleep(poll_interval_s)
+            continue
+        size = path.stat().st_size
+        if size < min_size_bytes:
+            last_path = path
+            last_size = size
+            stable_count = 0
+            time.sleep(poll_interval_s)
+            continue
+        if path == last_path and size == last_size:
+            stable_count += 1
+            if stable_count >= stable_checks:
+                return path
+        else:
+            stable_count = 1
+            last_path = path
+            last_size = size
+        time.sleep(poll_interval_s)
+    return None
+
+
+def wait_for_new_stable_file(
+    directory: Path,
+    *,
+    after: Path | None,
+    timeout_s: float = 10.0,
+    poll_interval_s: float = 0.2,
+    stable_checks: int = 3,
+    min_size_bytes: int = 1,
+) -> Path | None:
+    deadline = time.monotonic() + timeout_s
+    last_path: Path | None = None
+    last_size: int | None = None
+    stable_count = 0
+    after_mtime = after.stat().st_mtime if after is not None and after.exists() else None
+
+    while time.monotonic() < deadline:
+        path = newest_file_in_dir(directory)
+        if path is None:
+            time.sleep(poll_interval_s)
+            continue
+        if after is not None and path == after:
+            time.sleep(poll_interval_s)
+            continue
+        if after_mtime is not None and path.stat().st_mtime < after_mtime:
             time.sleep(poll_interval_s)
             continue
         size = path.stat().st_size
@@ -113,6 +166,29 @@ class ObsClientReal:
 
     def start_record(self) -> None:
         self._connect().start_record()
+
+    def is_replay_buffer_active(self) -> bool:
+        try:
+            response = self._connect().get_replay_buffer_status()
+        except Exception:
+            logger.exception("Failed to query OBS replay buffer status")
+            raise
+        return _record_output_active(response)
+
+    def start_replay_buffer(self) -> None:
+        self._connect().start_replay_buffer()
+
+    def ensure_replay_buffer(self) -> bool:
+        if self.is_replay_buffer_active():
+            return True
+        logger.info("OBS Replay Buffer inactive; starting it now")
+        self.start_replay_buffer()
+        return False
+
+    def save_replay_buffer(self) -> Path | None:
+        before = newest_file_in_dir(self._staging_dir)
+        self._connect().save_replay_buffer()
+        return wait_for_new_stable_file(self._staging_dir, after=before)
 
     def stop_orphan_recording(self) -> bool:
         """Stop OBS if it was left recording (e.g. after a bridge crash)."""
